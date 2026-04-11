@@ -22,6 +22,10 @@ related:
   - "[[Other Page]]"
 sources:
   - "[[.raw/articles/source-file.md]]"
+# Optional provenance fields — set when applicable, omit otherwise:
+sentiment: <critical|skeptical|neutral|mixed|enthusiastic>
+ingested_via: <notion_briefing|manual|web_fetch|youtube_mcp>
+briefing_date: YYYY-MM-DD
 ---
 ```
 
@@ -30,6 +34,11 @@ sources:
 - `developing`: has real content, not yet complete
 - `mature`: comprehensive, well-linked
 - `evergreen`: unlikely to need updates
+
+**Optional provenance fields** (omit if not applicable — they're universal in the sense that *any* type may carry them):
+- `sentiment`: your honest read of how the source or synthesis frames its subject. Use `critical` for red-team / negative takes, `skeptical` for cautious doubt, `neutral` for descriptive, `mixed` for balanced pros-and-cons, `enthusiastic` for boosterism. This field is what makes queries like "critical takes on AI coding agents" actually work — BM25 picks up the word `critical` in the frontmatter text when you ask for critical perspectives.
+- `ingested_via`: how this page reached the vault. `notion_briefing` for daily AI dev briefings, `manual` for paste / direct file drops, `web_fetch` for standalone URL ingestion, `youtube_mcp` for YouTube/MCP-driven transcripts.
+- `briefing_date`: if this page traces back to a specific daily briefing, the briefing's date in ISO form. Lets you answer "what did I learn on 2026-03-28" without scanning everything.
 
 ---
 
@@ -105,3 +114,4 @@ page_count: 0
 4. Wikilinks in YAML fields must be quoted: `"[[Page Name]]"`.
 5. Keep `related` and `sources` as wikilinks, not plain URLs.
 6. Update `updated` every time you edit the page content.
+7. Prefer to omit optional fields (including `sentiment`, `ingested_via`, `briefing_date`) rather than setting them to empty strings — flat YAML with `sentiment: ""` is worse than no `sentiment` key at all, because BM25 will still index the bare word.

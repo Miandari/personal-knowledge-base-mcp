@@ -1,12 +1,34 @@
 ---
 name: wiki-query
-description: "Answer questions using the Obsidian wiki vault. Reads hot cache first, then index, then relevant pages. Synthesizes answers with citations. Files good answers back as wiki pages. Supports quick, standard, and deep modes. Triggers on: what do you know about, query:, what is, explain, summarize, find in wiki, search the wiki, based on the wiki, wiki query quick, wiki query deep."
-allowed-tools: Read Glob Grep
+description: "Answer questions using the Obsidian wiki vault. Tries qmd hybrid search first, then falls back to hot cache + index + pages. Synthesizes answers with citations. Files good answers back as wiki pages. Supports quick, standard, and deep modes. Triggers on: what do you know about, query:, what is, explain, summarize, find in wiki, search the wiki, based on the wiki, wiki query quick, wiki query deep."
 ---
 
 # wiki-query: Query the Wiki
 
 The wiki has already done the synthesis work. Read strategically, answer precisely, and file good answers back so the knowledge compounds.
+
+---
+
+## Step 0 — Try qmd hybrid search first
+
+Before falling back to plain file reads, attempt retrieval through the `qmd` hybrid search engine (BM25 + vector + LLM rerank). This is almost always the right first move for Standard and Deep queries and is often enough for Quick queries too.
+
+**Preferred path (qmd MCP):**
+1. If the `mcp__qmd__query` tool is available, call it with the user's question as a single string. Pass `collection: "kb"`. Ask for ~15 results.
+2. Examine the returned candidates. For each result above score ~0.4, note the `docid` and the snippet.
+3. For the top 3–5 candidates, call `mcp__qmd__get` with the `docid` (or path) to fetch the full wiki page content.
+4. Synthesize the answer from those pages. Cite each page using wikilinks: `(Source: [[Page Name]])`.
+
+**Shell fallback** (if MCP tools are missing but the `qmd` CLI is on PATH):
+```bash
+qmd query "<user question>" -c kb --json -n 15
+qmd get "#<docid>" --full    # for each top candidate
+```
+Parse the JSON. Same synthesis rule.
+
+**Thin-results check.** If qmd returns fewer than 3 results above score ~0.4, continue to the classic hot.md → index → pages flow below. Do not assume qmd's output is the ground truth — it's a **ranked candidate set**, not an answer.
+
+**No-qmd fallback.** If neither the MCP tools nor the `qmd` CLI are available (e.g., first-run before `qmd embed`), skip to the classic flow below without error. The skill must remain usable without qmd.
 
 ---
 
@@ -17,8 +39,8 @@ Three depths. Choose based on the question complexity.
 | Mode | Trigger | Reads | Token cost | Best for |
 |------|---------|-------|------------|---------|
 | **Quick** | `query quick: ...` or simple factual Q | hot.md + index.md only | ~1,500 | "What is X?", date lookups, quick facts |
-| **Standard** | default (no flag) | hot.md + index + 3-5 pages | ~3,000 | Most questions |
-| **Deep** | `query deep: ...` or "thorough", "comprehensive" | Full wiki + optional web | ~8,000+ | "Compare A vs B across everything", synthesis, gap analysis |
+| **Standard** | default (no flag) | qmd top-5 → hot.md + 3-5 pages | ~3,000 | Most questions |
+| **Deep** | `query deep: ...` or "thorough", "comprehensive" | qmd top-15 → full wiki + optional web | ~8,000+ | "Compare A vs B across everything", synthesis, gap analysis |
 
 ---
 

@@ -1,7 +1,6 @@
 ---
 name: wiki-ingest
-description: "Ingest sources into the Obsidian wiki vault. Reads a source, extracts entities and concepts, creates or updates wiki pages, cross-references, and logs the operation. Supports files, URLs, and batch mode. Triggers on: ingest, process this source, add this to the wiki, read and file this, batch ingest, ingest all of these, ingest this url."
-allowed-tools: Read Write Edit Glob Grep Bash WebFetch
+description: "Ingest sources into the Obsidian wiki vault. Handles URLs, files, images, YouTube videos, audio files, and batch mode. Extracts entities and concepts, creates or updates wiki pages, cross-references, logs the operation, and refreshes the qmd hybrid search index. Triggers on: ingest, process this source, add this to the wiki, read and file this, batch ingest, ingest all of these, ingest this url, ingest this video, transcribe and ingest."
 ---
 
 # wiki-ingest: Source Ingestion
@@ -95,6 +94,68 @@ Use cases: whiteboard photos, screenshots, diagrams, infographics, document scan
 
 ---
 
+## Multimedia Ingestion (YouTube + audio)
+
+Trigger: user passes a YouTube URL, or an audio file (`.m4a`, `.mp3`, `.wav`, `.ogg`, `.webm`, `.flac`).
+
+### YouTube URLs
+
+Try methods in order; use the first one that works.
+
+**Method A — `yt-dlp` (preferred, works in Claude Code / terminal):**
+```bash
+which yt-dlp || brew install yt-dlp
+yt-dlp --skip-download \
+       --print title --print description --print duration_string \
+       --print view_count --print like_count --print upload_date --print channel \
+       "<URL>"
+yt-dlp --write-auto-sub --sub-lang en --skip-download -o "/tmp/%(id)s" "<URL>"
+```
+The `.en.vtt` file in `/tmp/` is the auto-generated transcript.
+
+**Method B — YouTube MCP tools**: if MCP tools expose YouTube transcript fetching, use them.
+
+**Method C — oEmbed fallback** (limited data, last resort):
+```bash
+curl -s "https://www.youtube.com/oembed?url=<URL>&format=json"
+```
+Returns title + channel only. Ask the user to paste the description or transcript.
+
+After fetching: save to `.raw/videos/<video-id>-<YYYY-MM-DD>.md` with frontmatter:
+```yaml
+---
+source_type: video
+source_url: "<URL>"
+title: "<title>"
+channel: "<channel>"
+upload_date: YYYY-MM-DD
+duration: "<mm:ss or hh:mm:ss>"
+fetched: YYYY-MM-DD
+ingested_via: youtube_mcp   # or manual
+---
+```
+Then proceed with **Single Source Ingest** starting at step 2.
+
+### Audio files
+
+```bash
+# Transcribe with Whisper (install if missing)
+which whisper || pip install openai-whisper
+whisper "<path/to/audio>" --model base --output_format txt --output_dir /tmp
+```
+
+If `whisper` can't be installed, ask the user to paste the transcript.
+
+After transcription:
+- Identify speakers where possible
+- Extract decisions, action items, quotes, promises
+- Save to `.raw/transcripts/<slug>-<YYYY-MM-DD>.md` with `source_type: transcript` frontmatter
+- Proceed with **Single Source Ingest**
+
+> These blocks are ported from `eugeniughelbur/obsidian-second-brain/commands/obsidian-ingest.md` (MIT). Upstream may evolve — see `bin/resync-claude-obsidian.sh` caveats.
+
+---
+
 ## Single Source Ingest
 
 Trigger: user drops a file into `.raw/` or pastes content.
@@ -103,7 +164,11 @@ Steps:
 
 1. **Read** the source completely. Do not skim.
 2. **Discuss** key takeaways with the user. Ask: "What should I emphasize? How granular?" Skip this if the user says "just ingest it."
-3. **Create** source summary in `wiki/sources/`. Use the source frontmatter schema from `references/frontmatter.md`.
+3. **Create** source summary in `wiki/sources/`. Use the source frontmatter schema from `references/frontmatter.md`. In addition to the schema defaults, set these briefing-aware universal fields when applicable:
+   - `sentiment`: one of `critical | skeptical | neutral | mixed | enthusiastic` — your honest read of how the source frames its subject. Omit if genuinely neutral / N/A.
+   - `ingested_via`: one of `notion_briefing | manual | web_fetch | youtube_mcp` — how this source reached the vault.
+   - `briefing_date`: YYYY-MM-DD of the originating daily briefing, if the source was pulled from one. Omit otherwise.
+   These fields also propagate onto any entity / concept pages created from this source, so cross-briefing retrieval queries like "critical takes on X" still match.
 4. **Create or update** entity pages for every person, org, product, and repo mentioned. One page per entity.
 5. **Create or update** concept pages for significant ideas and frameworks.
 6. **Update** relevant domain page(s) and their `_index.md` sub-indexes.
@@ -120,6 +185,11 @@ Steps:
     - Key insight: One sentence on what is new.
     ```
 11. **Check for contradictions.** If new info conflicts with existing pages, add `> [!contradiction]` callouts on both pages.
+12. **Refresh the qmd hybrid index** so the new / rewritten pages are searchable immediately:
+    ```bash
+    command -v qmd >/dev/null 2>&1 && qmd update --collection kb && qmd embed -f || true
+    ```
+    The `-f` forces re-embedding of changed pages. If `qmd` is not installed or the collection doesn't exist yet, the command no-ops (`|| true`) — do not block the ingest on it.
 
 ---
 
@@ -133,7 +203,8 @@ Steps:
 2. Process each source following the single ingest flow. Defer cross-referencing between sources until step 3.
 3. After all sources: do a cross-reference pass. Look for connections between the newly ingested sources.
 4. Update index, hot cache, and log once at the end (not per-source).
-5. Report: "Processed N sources. Created X pages, updated Y pages. Here are the key connections I found."
+5. **Refresh the qmd hybrid index ONCE** at the end of the batch: `command -v qmd >/dev/null 2>&1 && qmd update --collection kb && qmd embed -f || true`
+6. Report: "Processed N sources. Created X pages, updated Y pages. Here are the key connections I found."
 
 Batch ingest is less interactive. For 30+ sources, expect significant processing time. Check in with the user after every 10 sources.
 
