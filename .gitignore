@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Claude Code local permission cache (machine-specific)
+.claude/settings.local.json
+
+# Resync backups
+.resync-backup/
+
+# Obsidian workspace state (keeps config but not UI state)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
