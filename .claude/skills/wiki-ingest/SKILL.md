@@ -1,6 +1,6 @@
 ---
 name: wiki-ingest
-description: "Ingest sources into the Obsidian wiki vault. Handles URLs, files, images, YouTube videos, audio files, and batch mode. Extracts entities and concepts, creates or updates wiki pages, cross-references, logs the operation, and refreshes the qmd hybrid search index. Triggers on: ingest, process this source, add this to the wiki, read and file this, batch ingest, ingest all of these, ingest this url, ingest this video, transcribe and ingest."
+description: "Ingest sources into the Obsidian wiki vault. Handles URLs, files, images, YouTube videos, audio files, and batch mode. Extracts entities and concepts, creates or updates wiki pages, cross-references, logs the operation, and refreshes the SQLite search index. Triggers on: ingest, process this source, add this to the wiki, read and file this, batch ingest, ingest all of these, ingest this url, ingest this video, transcribe and ingest."
 ---
 
 # wiki-ingest: Source Ingestion
@@ -185,11 +185,11 @@ Steps:
     - Key insight: One sentence on what is new.
     ```
 11. **Check for contradictions.** If new info conflicts with existing pages, add `> [!contradiction]` callouts on both pages.
-12. **Refresh the qmd hybrid index** so the new / rewritten pages are searchable immediately:
+12. **Refresh the SQLite search index** so the new / rewritten pages are searchable immediately:
     ```bash
-    command -v qmd >/dev/null 2>&1 && qmd update --collection kb && qmd embed -f || true
+    python3 -m kb rebuild || true
     ```
-    The `-f` forces re-embedding of changed pages. If `qmd` is not installed or the collection doesn't exist yet, the command no-ops (`|| true`) — do not block the ingest on it.
+    This re-indexes all wiki pages into the SQLite database (FTS5 + vector embeddings). If the `kb` package is not installed, the command no-ops (`|| true`) — do not block the ingest on it.
 
 ---
 
@@ -203,7 +203,7 @@ Steps:
 2. Process each source following the single ingest flow. Defer cross-referencing between sources until step 3.
 3. After all sources: do a cross-reference pass. Look for connections between the newly ingested sources.
 4. Update index, hot cache, and log once at the end (not per-source).
-5. **Refresh the qmd hybrid index ONCE** at the end of the batch: `command -v qmd >/dev/null 2>&1 && qmd update --collection kb && qmd embed -f || true`
+5. **Refresh the SQLite search index ONCE** at the end of the batch: `python3 -m kb rebuild || true`
 6. Report: "Processed N sources. Created X pages, updated Y pages. Here are the key connections I found."
 
 Batch ingest is less interactive. For 30+ sources, expect significant processing time. Check in with the user after every 10 sources.

@@ -1,0 +1,31 @@
+[project]
+name = "compiled-knowledge-base"
+version = "0.1.0"
+description = "Personal LLM wiki with SQLite + DAG + demand-driven compilation"
+requires-python = ">=3.11"
+dependencies = [
+    "apsw>=3.46",
+    "sqlite-vec>=0.1.6",
+    "voyageai>=0.3.2",
+    "mcp[cli]>=1.9.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "tenacity>=9.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.3",
+    "anthropic>=0.52",
+    "openai>=1.60",
+    "google-genai>=1.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["kb"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

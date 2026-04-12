@@ -18,7 +18,7 @@ if _env_file.exists():
     load_dotenv(_env_file)
 
 
-# ── pytest CLI options ───────────────────────────────────────────────
+# -- pytest CLI options ------------------------------------------------
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -40,18 +40,12 @@ def pytest_addoption(parser):
     )
 
 
-# ── Fixtures ─────────────────────────────────────────────────────────
+# -- Fixtures ----------------------------------------------------------
 
 @pytest.fixture(scope="session")
 def vault_path() -> Path:
     """Path to the vault under test (from config.py, not .env)."""
     return config.VAULT_PATH
-
-
-@pytest.fixture(scope="session")
-def qmd_collection() -> str:
-    """qmd collection name (from config.py)."""
-    return config.QMD_COLLECTION
 
 
 @pytest.fixture(scope="session")
@@ -88,7 +82,7 @@ def judge_fn(request):
 def sandbox(vault_path, use_live_vault):
     """Provide a temporary vault sandbox. Skips if --live-vault is set."""
     if use_live_vault:
-        pytest.skip("Sandbox disabled — running against live vault (--live-vault)")
+        pytest.skip("Sandbox disabled -- running against live vault (--live-vault)")
     from .lib.vault_sandbox import VaultSandbox
     with VaultSandbox(vault_path) as sb:
         yield sb

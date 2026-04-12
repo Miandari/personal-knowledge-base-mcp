@@ -23,6 +23,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# SQLite database (derived, rebuildable from markdown)
+kb.db
+kb.db-wal
+kb.db-shm
+
 # Obsidian workspace state (keeps config but not UI state)
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json

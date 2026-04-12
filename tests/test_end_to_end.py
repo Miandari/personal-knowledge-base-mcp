@@ -1,54 +1,62 @@
 """End-to-end smoke tests.
 
-Full pipeline: raw dump exists → wiki pages compiled → qmd indexed → query returns answer.
-Runs against the live vault when TEST_USE_LIVE_VAULT=true.
+Full pipeline: raw dump exists -> wiki pages compiled -> indexed in SQLite -> query returns answer.
 """
 
 import os
+from pathlib import Path
 
 import pytest
-from .lib.qmd_client import qmd_query, qmd_status
+
+import sys
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from tests.lib.kb_client import kb_query, kb_status
 
 
 class TestIndexHealth:
-    """Verify the qmd index is in a usable state."""
+    """Verify the SQLite index is in a usable state."""
 
-    def test_qmd_is_available(self):
-        status = qmd_status()
-        assert status["returncode"] == 0, f"qmd status failed: {status['output']}"
+    def test_db_exists(self):
+        from kb import config
+        assert config.DB_PATH.exists(), f"No database at {config.DB_PATH}. Run `python -m kb rebuild` first."
 
-    def test_collection_has_documents(self, qmd_collection):
-        status = qmd_status(qmd_collection)
-        assert "Files:" in status["output"], "qmd status doesn't show file count"
-        # Extract file count
-        for line in status["output"].split("\n"):
-            if "Files:" in line:
-                count = int(line.split("Files:")[1].strip().split()[0])
-                assert count > 0, "Collection has 0 files"
-                break
+    def test_index_has_documents(self):
+        status = kb_status()
+        assert "error" not in status, f"Status error: {status}"
+        assert status["node_count"] > 0, "Index has 0 nodes"
+
+    def test_index_has_chunks(self):
+        status = kb_status()
+        assert status["chunk_count"] > 0, "Index has 0 chunks"
+
+    def test_embedding_coverage(self):
+        status = kb_status()
+        assert status["embedding_coverage"] > 0, "No embeddings in index"
 
 
 class TestEndToEnd:
     """Full pipeline smoke tests."""
 
-    def test_query_returns_results(self, qmd_collection):
+    def test_query_returns_results(self):
         """A generic query should return at least one result."""
-        results = qmd_query("AI coding agents", collection=qmd_collection, n=5, mode="bm25")
-        assert len(results) > 0, "qmd returned zero results for 'AI coding agents'"
+        results = kb_query("AI coding agents", n=5, mode="bm25")
+        assert len(results) > 0, "Search returned zero results for 'AI coding agents'"
 
-    def test_query_results_have_required_fields(self, qmd_collection):
+    def test_query_results_have_required_fields(self):
         """Results should have title, path, score, snippet."""
-        results = qmd_query("agent memory", collection=qmd_collection, n=3, mode="bm25")
+        results = kb_query("agent memory", n=3, mode="bm25")
         for r in results:
             assert r.title, f"Result missing title: {r}"
             assert r.path, f"Result missing path: {r}"
             assert r.score >= 0, f"Result has invalid score: {r.score}"
 
-    def test_uncomfortable_truths_golden_path(self, qmd_collection):
-        """The full golden path: query → target article in top 5."""
-        results = qmd_query(
+    def test_uncomfortable_truths_golden_path(self):
+        """The full golden path: query -> target article in top 5."""
+        results = kb_query(
             "critical takes on AI coding agents",
-            collection=qmd_collection,
             n=5,
             mode="hybrid_no_rerank",
         )
@@ -59,11 +67,10 @@ class TestEndToEnd:
             f"Got: {[p.split('/')[-1] for p in paths]}"
         )
 
-    def test_cross_concept_retrieval(self, qmd_collection):
+    def test_cross_concept_retrieval(self):
         """A query touching two concepts should surface both."""
-        results = qmd_query(
+        results = kb_query(
             "relationship between agent memory and context window length",
-            collection=qmd_collection,
             n=10,
             mode="hybrid_no_rerank",
         )
@@ -81,7 +88,7 @@ class TestLiveVaultOnly:
     @pytest.fixture(autouse=True)
     def _require_live(self, use_live_vault):
         if not use_live_vault:
-            pytest.skip("Skipped — requires TEST_USE_LIVE_VAULT=true")
+            pytest.skip("Skipped -- requires --live-vault flag")
 
     def test_hot_cache_not_empty(self, vault_path):
         hot = vault_path / "wiki" / "hot.md"

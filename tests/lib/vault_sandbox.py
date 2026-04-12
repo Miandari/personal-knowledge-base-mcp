@@ -1,13 +1,21 @@
 """Vault sandbox for tests that write files.
 
-Copies the vault to a temp dir and provides a scoped qmd collection.
+Copies the vault to a temp dir, builds a scoped SQLite index.
 """
 
-import os
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
+
+import sys
+_project_root = Path(__file__).resolve().parent.parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from kb.db import get_connection, init_schema
+from kb.indexer import Indexer
+from kb.embeddings import NoopEmbedding
+from kb.search import hybrid_search, fts_search
 
 
 class VaultSandbox:
@@ -16,44 +24,42 @@ class VaultSandbox:
     Usage:
         with VaultSandbox(source_vault) as sb:
             sb.write_raw("articles/test.md", content)
-            results = sb.qmd_query("test query")
+            results = sb.kb_search("test query")
     """
 
     def __init__(self, source_vault: str | Path):
         self.source = Path(source_vault)
         self.tmpdir = None
         self.vault_path = None
-        self.collection_name = "kb_test"
+        self._conn = None
+        self._db_path = None
 
     def __enter__(self):
         self.tmpdir = tempfile.mkdtemp(prefix="kb_test_")
         self.vault_path = Path(self.tmpdir) / "vault"
 
-        # Copy wiki/ and .raw/ — skip .git, .obsidian, heavy dirs
+        # Copy wiki/ and .raw/ -- skip .git, .obsidian, heavy dirs
         shutil.copytree(
             self.source,
             self.vault_path,
-            ignore=shutil.ignore_patterns(".git", ".obsidian", "node_modules", ".qmd"),
+            ignore=shutil.ignore_patterns(".git", ".obsidian", "node_modules", ".qmd", "kb.db*"),
         )
 
-        # Register a temp qmd collection pointing at the sandbox wiki/
-        subprocess.run(
-            ["qmd", "collection", "add", str(self.vault_path / "wiki"), "--name", self.collection_name],
-            capture_output=True, text=True, timeout=30,
-        )
-        subprocess.run(
-            ["qmd", "update", "--collection", self.collection_name],
-            capture_output=True, text=True, timeout=30,
-        )
+        # Create a sandbox SQLite database
+        self._db_path = Path(self.tmpdir) / "sandbox.db"
+        self._conn = get_connection(self._db_path)
+        init_schema(self._conn)
+
+        # Index the sandbox wiki with noop embeddings
+        provider = NoopEmbedding()
+        indexer = Indexer(self._conn, wiki_dir=self.vault_path / "wiki", embedding_provider=provider)
+        indexer.rebuild()
+
         return self
 
     def __exit__(self, *exc):
-        # Remove the temp collection from qmd
-        subprocess.run(
-            ["qmd", "collection", "remove", self.collection_name],
-            capture_output=True, text=True, timeout=15,
-        )
-        # Clean up temp dir
+        if self._conn:
+            self._conn.close()
         if self.tmpdir:
             shutil.rmtree(self.tmpdir, ignore_errors=True)
 
@@ -82,27 +88,13 @@ class VaultSandbox:
         return [str(p.relative_to(self.vault_path / "wiki"))
                 for p in (self.vault_path / "wiki").glob(pattern)]
 
-    def qmd_update_and_embed(self):
-        """Re-index the sandbox collection."""
-        subprocess.run(
-            ["qmd", "update", "--collection", self.collection_name],
-            capture_output=True, text=True, timeout=60,
-        )
-        subprocess.run(
-            ["qmd", "embed", "-f"],
-            capture_output=True, text=True, timeout=120,
-        )
+    def reindex(self):
+        """Re-index the sandbox after writing new files."""
+        provider = NoopEmbedding()
+        indexer = Indexer(self._conn, wiki_dir=self.vault_path / "wiki", embedding_provider=provider)
+        indexer.rebuild(force=True)
 
-    def qmd_query(self, query: str, n: int = 10) -> list[dict]:
-        """Query the sandbox's qmd collection."""
-        import json
-        result = subprocess.run(
-            ["qmd", "search", query, "-c", self.collection_name, "-n", str(n), "--json"],
-            capture_output=True, text=True, timeout=120,
-        )
-        if result.returncode != 0:
-            return []
-        stdout = result.stdout.strip()
-        if not stdout:
-            return []
-        return json.loads(stdout)
+    def kb_search(self, query: str, n: int = 10) -> list[dict]:
+        """Search the sandbox's index."""
+        results = fts_search(self._conn, query, limit=n)
+        return [r.model_dump() for r in results]

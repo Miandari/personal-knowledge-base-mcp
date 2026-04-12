@@ -1,8 +1,9 @@
 {
   "mcpServers": {
-    "qmd": {
-      "command": "qmd",
-      "args": ["mcp"]
+    "kb": {
+      "command": "python",
+      "args": ["-m", "kb", "server"],
+      "cwd": "."
     }
   },
   "hooks": {

@@ -1,7 +1,7 @@
 """Synthesis quality tests via LLM-as-judge.
 
 For a set of queries:
-1. Retrieve relevant wiki pages via qmd
+1. Retrieve relevant wiki pages via kb search
 2. Construct a synthesis prompt
 3. Call Claude (or the configured LLM) to produce an answer
 4. Call the LLM judge to rate the answer
@@ -10,15 +10,22 @@ Requires ANTHROPIC_API_KEY (or the configured judge's API key) in .env.
 """
 
 import os
+from pathlib import Path
 
 import pytest
-from .lib.llm_judge import get_judge, JudgeVerdict
-from .lib.qmd_client import qmd_query, qmd_get
+
+import sys
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from tests.lib.llm_judge import get_judge, JudgeVerdict
+from tests.lib.kb_client import kb_query, kb_get
 
 # Skip the entire module if no API key is available
 pytestmark = pytest.mark.skipif(
     not os.getenv("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY not set — skipping LLM judge tests",
+    reason="ANTHROPIC_API_KEY not set -- skipping LLM judge tests",
 )
 
 SYNTHESIS_CASES = [
@@ -41,22 +48,22 @@ SYNTHESIS_CASES = [
 ]
 
 
-def _synthesize_answer(query: str, collection: str = "kb") -> tuple[str, str]:
+def _synthesize_answer(query: str) -> tuple[str, str]:
     """Retrieve pages and produce a synthesis. Returns (wiki_pages_text, answer)."""
     import anthropic
 
-    # Retrieve
-    results = qmd_query(query, collection=collection, n=5, mode="hybrid_no_rerank")
+    # Retrieve via kb_client
+    results = kb_query(query, n=5, mode="hybrid_no_rerank")
     if not results:
-        return ("(no results)", "(no answer — qmd returned nothing)")
+        return ("(no results)", "(no answer -- search returned nothing)")
 
     # Fetch full pages
     pages_text = ""
     for r in results[:3]:
         try:
-            content = qmd_get(r.docid or r.path)
+            content = kb_get(r.node_id)
             pages_text += f"\n\n--- {r.title} ({r.path}) ---\n{content[:3000]}"
-        except RuntimeError:
+        except (RuntimeError, Exception):
             pages_text += f"\n\n--- {r.title} ({r.path}) ---\n{r.snippet}"
 
     # Synthesize via Claude
@@ -104,7 +111,6 @@ class TestSynthesisQuality:
             question=query, wiki_pages=wiki_pages, answer=answer
         )
 
-        # Print details for debugging (visible with pytest -s)
         print(f"\n--- Synthesis test: {query[:60]} ---")
         print(f"  Groundedness:  {verdict.groundedness}/5")
         print(f"  Citations:     {verdict.citation_correctness}/5")
@@ -122,25 +128,16 @@ class TestSynthesisQuality:
 
 
 class TestMultiSourceSynthesis:
-    """Test that cross-briefing synthesis actually works.
-
-    The key question: did wiki compilation create cross-referenced pages
-    that enable synthesis across multiple briefings, or did each briefing
-    become an isolated silo?
-    """
+    """Test that cross-briefing synthesis actually works."""
 
     @pytest.mark.timeout(120)
     def test_cross_briefing_overview(self, judge_fn):
-        """Ask for an overview across all briefings. The answer should
-        reference multiple briefings, mention multiple tools, and cover
-        multiple sub-topics."""
         query = (
             "Summarize what I've learned about AI agent infrastructure "
             "in the last two weeks"
         )
         wiki_pages, answer = _synthesize_answer(query)
 
-        # ── LLM judge: standard quality check ──
         verdict = judge_fn(question=query, wiki_pages=wiki_pages, answer=answer)
         print(f"\n--- Multi-source synthesis ---")
         print(f"  Overall: {verdict.overall:.1f}/5  |  {verdict.reasoning}")
@@ -150,19 +147,14 @@ class TestMultiSourceSynthesis:
             f"Reasoning: {verdict.reasoning}"
         )
 
-        # ── Programmatic breadth checks ──
         import re
         wikilinks = re.findall(r"\[\[([^\]]+)\]\]", answer)
         unique_links = set(wikilinks)
 
-        # Should cite at least 3 different wiki pages
         assert len(unique_links) >= 3, (
-            f"Expected ≥3 unique [[wikilinks]], got {len(unique_links)}: {unique_links}. "
-            "This suggests the synthesis is pulling from a single page, not cross-referencing."
+            f"Expected >=3 unique [[wikilinks]], got {len(unique_links)}: {unique_links}. "
         )
 
-        # Should mention at least 2 different tools/repos/products by name
-        # (with 13 wiki pages and a broad overview query, 2 is realistic)
         tool_keywords = [
             "mempalace", "superpowers", "claude-obsidian", "codesight",
             "caveman", "openclaude", "memoriki", "qmd", "dapr",
@@ -172,11 +164,9 @@ class TestMultiSourceSynthesis:
         ]
         mentioned = [kw for kw in tool_keywords if kw.lower() in answer.lower()]
         assert len(mentioned) >= 2, (
-            f"Expected ≥2 tools/repos mentioned, got {len(mentioned)}: {mentioned}. "
-            "The synthesis may be too narrow."
+            f"Expected >=2 tools/repos mentioned, got {len(mentioned)}: {mentioned}. "
         )
 
-        # Should cover multiple sub-topics (check for topic marker words)
         subtopic_markers = {
             "memory": ["memory", "mempalace", "persistent", "knowledge base"],
             "mcp": ["mcp", "protocol", "model context protocol"],
@@ -190,29 +180,22 @@ class TestMultiSourceSynthesis:
                 topics_covered.append(topic)
 
         assert len(topics_covered) >= 2, (
-            f"Expected ≥2 sub-topics covered, got {len(topics_covered)}: {topics_covered}. "
-            "The synthesis may be a single-topic answer dressed as an overview."
+            f"Expected >=2 sub-topics covered, got {len(topics_covered)}: {topics_covered}. "
         )
         print(f"  Breadth: {len(unique_links)} wikilinks, {len(mentioned)} tools, {len(topics_covered)} sub-topics")
 
 
 class TestSingleArticleSummary:
-    """Test that the system can summarize a specific known article.
-
-    The opposite of multi-source: can it zoom in on ONE source, give a
-    faithful summary, and not contaminate it with unrelated content?
-    """
+    """Test that the system can summarize a specific known article."""
 
     @pytest.mark.timeout(120)
     def test_summarize_uncomfortable_truths(self, judge_fn):
-        """Ask for a summary of the specific standupforme.app article."""
         query = (
             "Summarize the article 'Some uncomfortable truths about AI coding agents' "
             "from standupforme.app"
         )
         wiki_pages, answer = _synthesize_answer(query)
 
-        # ── LLM judge ──
         verdict = judge_fn(question=query, wiki_pages=wiki_pages, answer=answer)
         print(f"\n--- Single-article summary ---")
         print(f"  Overall: {verdict.overall:.1f}/5  |  {verdict.reasoning}")
@@ -222,32 +205,17 @@ class TestSingleArticleSummary:
             f"Reasoning: {verdict.reasoning}"
         )
 
-        # ── Programmatic content checks ──
         answer_lower = answer.lower()
-
-        # Must reference the source page (by slug, title, or URL)
         assert any(marker in answer_lower for marker in [
-            "uncomfortable-truths",    # filename slug
-            "uncomfortable truths",    # natural title
-            "standupforme",            # domain
-        ]), (
-            "Answer doesn't reference the uncomfortable-truths article by name, title, or URL"
-        )
+            "uncomfortable-truths", "uncomfortable truths", "standupforme",
+        ]), "Answer doesn't reference the uncomfortable-truths article"
 
-        # Must mention at least 2 of the article's key critiques
         critique_markers = [
-            "scaffolding",        # the scaffolding problem
-            "institutional",      # institutional context gap
-            "production",         # production-readiness
-            "silent",             # silent failures / silent optimization erosion
-            "rewrite",            # 30-40% rewrite rate
-            "architectural",      # architectural drift / incoherence
-            "ip", "copyright",    # IP/copyright overhang
-            "performance",        # silent performance regressions
+            "scaffolding", "institutional", "production", "silent",
+            "rewrite", "architectural", "ip", "copyright", "performance",
         ]
         critiques_found = [m for m in critique_markers if m in answer_lower]
         assert len(critiques_found) >= 2, (
-            f"Expected ≥2 critique markers, got {len(critiques_found)}: {critiques_found}. "
-            "The summary may be too shallow or pulling from the wrong page."
+            f"Expected >=2 critique markers, got {len(critiques_found)}: {critiques_found}. "
         )
         print(f"  Critique markers found: {critiques_found}")
