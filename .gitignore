@@ -12,8 +12,16 @@ node_modules/
 # Claude Code local permission cache (machine-specific)
 .claude/settings.local.json
 
+# Secrets — never commit .env with real API keys
+.env
+
 # Resync backups
 .resync-backup/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
 
 # Obsidian workspace state (keeps config but not UI state)
 .obsidian/workspace.json
