@@ -166,3 +166,78 @@ class TestFlatYAML:
                 if isinstance(val, dict):
                     failures.append(f"{rel}: field '{key}' is a nested object — must be flat YAML")
         assert not failures, "\n".join(failures)
+
+
+class TestSentimentCoverage:
+    """Sentiment field coverage and distribution tests.
+
+    If the ingestion pipeline assigns sentiment correctly, source pages
+    should almost always have it, and the distribution shouldn't be
+    monocultural (all-neutral = classifier not working).
+    """
+
+    def test_source_pages_have_sentiment(self, vault_path):
+        """Source-type pages should (almost) always have a sentiment field.
+
+        Every article, blog post, paper, etc. has a tone — critical,
+        enthusiastic, neutral. If a source page lacks sentiment, the
+        ingestion didn't classify it.
+        """
+        source_pages = [
+            p for p in _all_wiki_pages(vault_path)
+            if _extract_frontmatter(p) and _extract_frontmatter(p).get("type") == "source"
+        ]
+        if not source_pages:
+            pytest.skip("No source-type pages in the vault")
+
+        missing = []
+        for p in source_pages:
+            fm = _extract_frontmatter(p)
+            if "sentiment" not in fm or not fm["sentiment"]:
+                missing.append(str(p.relative_to(vault_path)))
+
+        # Allow up to 20% of source pages to lack sentiment (grace for edge cases)
+        missing_ratio = len(missing) / len(source_pages)
+        assert missing_ratio <= 0.2, (
+            f"{len(missing)}/{len(source_pages)} source pages lack sentiment ({missing_ratio:.0%}):\n"
+            + "\n".join(missing)
+        )
+
+    def test_overall_sentiment_coverage(self, vault_path):
+        """What percentage of ALL wiki pages have a sentiment field?
+
+        Not a hard pass/fail — this is a diagnostic that prints the
+        coverage ratio. Fails only if 0 pages have sentiment (meaning
+        the pipeline never sets it).
+        """
+        pages = _all_wiki_pages(vault_path)
+        with_sentiment = [
+            p for p in pages
+            if _extract_frontmatter(p) and _extract_frontmatter(p).get("sentiment")
+        ]
+        ratio = len(with_sentiment) / len(pages) if pages else 0
+        print(f"\n--- Sentiment coverage: {len(with_sentiment)}/{len(pages)} pages ({ratio:.0%}) ---")
+        assert len(with_sentiment) > 0, "Zero pages have a sentiment field — pipeline never assigns it"
+
+    def test_sentiment_distribution_not_monocultural(self, vault_path):
+        """If all pages with sentiment have the same value, the classifier
+        isn't working — it's just stamping a default."""
+        sentiments = []
+        for p in _all_wiki_pages(vault_path):
+            fm = _extract_frontmatter(p)
+            if fm and fm.get("sentiment"):
+                sentiments.append(fm["sentiment"])
+
+        if len(sentiments) < 2:
+            pytest.skip("Fewer than 2 pages with sentiment — can't check distribution")
+
+        unique = set(sentiments)
+        print(f"\n--- Sentiment distribution: {dict((s, sentiments.count(s)) for s in unique)} ---")
+        # Soft check: with 2+ sentiment-bearing pages we expect at least 1 distinct value.
+        # With 5+ pages we'd expect 2+ distinct values. For now just log it.
+        # This becomes a hard assertion as the vault grows.
+        if len(sentiments) >= 5 and len(unique) < 2:
+            pytest.fail(
+                f"All {len(sentiments)} sentiment-bearing pages are '{sentiments[0]}' — "
+                "the classifier may be stamping a default rather than reading the source."
+            )

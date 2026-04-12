@@ -2,9 +2,13 @@
 
 Parametrized over fixtures/retrieval_cases.yaml. Runs each query against
 multiple qmd modes and checks that expected pages appear in the top-k.
+Also tests negative retrieval (queries that should return nothing).
 """
 
+from pathlib import Path
+
 import pytest
+import yaml
 from .lib.qmd_client import qmd_query, precision_at_k, mrr
 
 
@@ -17,6 +21,15 @@ QMD_MODES = ["bm25", "hybrid_no_rerank"]
 @pytest.fixture(scope="session")
 def qmd_col(qmd_collection):
     return qmd_collection
+
+
+@pytest.fixture(scope="session")
+def negative_cases() -> list[dict]:
+    """Load negative retrieval cases from the YAML fixture."""
+    fixture = Path(__file__).parent / "fixtures" / "retrieval_cases.yaml"
+    with open(fixture) as f:
+        data = yaml.safe_load(f)
+    return data.get("negative_cases", [])
 
 
 class TestRetrieval:
@@ -121,3 +134,40 @@ class TestRetrievalMRR:
             f"[{mode}] Average MRR = {avg:.2f} (need >= 0.50). "
             f"Per-case: {[f'{v:.2f}' for v in mrr_values]}"
         )
+
+
+class TestNegativeRetrieval:
+    """Queries about topics NOT in the vault should return nothing meaningful.
+
+    A system that returns everything for every query would pass all the
+    positive tests above. These verify it correctly returns nothing (or
+    only very low-scoring noise) for topics the vault has no knowledge of.
+    """
+
+    @pytest.mark.parametrize("mode", QMD_MODES)
+    def test_no_false_positives(self, negative_cases, qmd_col, mode):
+        """Negative queries should return 0 results above their score threshold."""
+        if not negative_cases:
+            pytest.skip("No negative cases defined")
+
+        false_positives = []
+        for case in negative_cases:
+            query = case["query"]
+            threshold = case.get("score_threshold", 0.4)
+
+            try:
+                results = qmd_query(query, collection=qmd_col, n=5, mode=mode)
+            except RuntimeError:
+                continue  # qmd error is fine — no results is the expected outcome
+
+            above = [r for r in results if r.score >= threshold]
+            if above:
+                false_positives.append(
+                    f"[{mode}] '{query}': {len(above)} result(s) above {threshold}: "
+                    f"{[(r.path.split('/')[-1], f'{r.score:.2f}') for r in above]}"
+                )
+
+        if false_positives:
+            pytest.fail(
+                f"{len(false_positives)} false positive(s):\n" + "\n".join(false_positives)
+            )

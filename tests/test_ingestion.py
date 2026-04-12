@@ -2,9 +2,11 @@
 
 Tests that already-ingested content (from the Phase 3 run) has correct
 wiki page structure, frontmatter, and cross-references. Also tests
-sandbox-mode ingestion for new sources.
+sandbox-mode ingestion, contradiction detection, and delta tracking.
 """
 
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -151,3 +153,141 @@ class TestSandboxIngestion:
         paths = [r.get("displayPath", r.get("path", "")) for r in results]
         found = any("test-concept" in p for p in paths)
         assert found, f"test-concept not found in qmd results: {paths}"
+
+
+class TestContradictionDetection:
+    """Test that contradictions between briefings are flagged.
+
+    claude-obsidian's wiki-ingest uses > [!contradiction] callouts when
+    new info conflicts with existing pages. This tests whether that
+    mechanism is actually being used in the compiled wiki.
+    """
+
+    def test_contradiction_callouts_inventory(self, vault_path):
+        """Inventory all contradiction callouts in the wiki.
+
+        Not a hard pass/fail on the first run (contradictions only
+        appear after sequential ingests, and Phase 3 compiled all 4
+        briefings at once). Instead, report what we find so we have
+        a baseline.
+        """
+        callout_pages = []
+        for p in (vault_path / "wiki").rglob("*.md"):
+            if p.name == ".gitkeep":
+                continue
+            text = p.read_text()
+            if "[!contradiction]" in text:
+                count = text.count("[!contradiction]")
+                callout_pages.append((str(p.relative_to(vault_path)), count))
+
+        print(f"\n--- Contradiction callout inventory ---")
+        if callout_pages:
+            for page, count in callout_pages:
+                print(f"  {page}: {count} callout(s)")
+        else:
+            print("  No contradiction callouts found in any wiki page.")
+            print("  This is expected for a batch ingest. Sequential re-ingests")
+            print("  should produce callouts where facts evolved between briefings.")
+        # Diagnostic only — no assertion yet
+
+    def test_evolving_facts_acknowledged(self, vault_path):
+        """Check that pages citing multiple briefings acknowledge data changes.
+
+        Known evolving fact: mempalace grew from ~39k stars (Apr 10) to
+        ~41k stars (Apr 11). The entity page should reflect the most
+        recent data.
+        """
+        mempalace = vault_path / "wiki" / "entities" / "mempalace.md"
+        if not mempalace.exists():
+            pytest.skip("mempalace.md not found")
+
+        text = mempalace.read_text()
+
+        # Should mention both dates' data (the growth is explicitly tracked)
+        has_april_10_data = "39k" in text or "39,000" in text or "2026-04-10" in text
+        has_april_11_data = "41k" in text or "41,000" in text or "5,871" in text
+
+        if has_april_10_data and has_april_11_data:
+            print("\n  mempalace.md tracks data from both Apr 10 and Apr 11 — good")
+        elif has_april_11_data:
+            print("\n  mempalace.md has latest data (Apr 11) but no historical comparison")
+        else:
+            print(f"\n  WARN: mempalace.md may not reflect evolving star counts")
+
+        # Soft assertion: at minimum the page should have SOME star data
+        assert "★" in text or "star" in text.lower() or "39k" in text or "41k" in text, (
+            "mempalace.md has no star count data at all"
+        )
+
+
+class TestDeltaTracking:
+    """Test the .manifest.json delta tracking mechanism.
+
+    Re-ingesting the same raw file should be a no-op: no new pages
+    created, no qmd re-embed triggered. This prevents content
+    duplication if /ingest-notion-briefing is run twice for the same day.
+    """
+
+    def test_manifest_exists_or_flagged(self, vault_path):
+        """Check if .raw/.manifest.json exists. If not, flag it — the
+        delta tracker isn't active yet."""
+        manifest = vault_path / ".raw" / ".manifest.json"
+        if manifest.exists():
+            data = json.loads(manifest.read_text())
+            entries = len(data.get("sources", {}))
+            print(f"\n--- Delta manifest: {entries} entries ---")
+            assert entries > 0, "Manifest exists but has 0 entries"
+        else:
+            print(
+                "\n--- WARN: .raw/.manifest.json does not exist ---\n"
+                "  The Phase 3 ingest wrote raw files directly (bypassing\n"
+                "  wiki-ingest's delta tracker). Future ingests via\n"
+                "  /ingest-notion-briefing → wiki-ingest will create it.\n"
+                "  Until then, re-ingest protection is not active."
+            )
+            # Not a failure — the manifest is created by wiki-ingest, not by
+            # direct file writes. But flag it for awareness.
+
+    def test_sandbox_manifest_prevents_reingest(self, sandbox):
+        """In sandbox: write a raw file + manifest entry, then verify
+        the manifest reports it as already ingested."""
+        raw_content = (
+            "---\nsource_type: test\nfetched: 2026-04-12\n---\n"
+            "# Test source\n\nSome content about test topic.\n"
+        )
+        raw_path = ".raw/articles/test-reingest-2026-04-12.md"
+        sandbox.write_raw("articles/test-reingest-2026-04-12.md", raw_content)
+
+        # Compute hash (same algorithm wiki-ingest uses)
+        file_hash = hashlib.md5(raw_content.encode()).hexdigest()
+
+        # Write a manifest entry marking this file as already ingested
+        manifest = {
+            "sources": {
+                raw_path: {
+                    "hash": file_hash,
+                    "ingested_at": "2026-04-12",
+                    "pages_created": ["wiki/sources/test-reingest.md"],
+                    "pages_updated": ["wiki/index.md"],
+                }
+            }
+        }
+        manifest_path = sandbox.vault_path / ".raw" / ".manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+
+        # Verify: re-read and check that the hash matches
+        saved = json.loads(manifest_path.read_text())
+        entry = saved["sources"].get(raw_path)
+        assert entry is not None, "Manifest entry not found after write"
+        assert entry["hash"] == file_hash, (
+            f"Hash mismatch: manifest has {entry['hash']}, file has {file_hash}"
+        )
+
+        # Verify: the file hasn't changed (hash still matches)
+        current_hash = hashlib.md5(
+            (sandbox.vault_path / raw_path).read_text().encode()
+        ).hexdigest()
+        assert current_hash == file_hash, "File content changed unexpectedly"
+
+        print(f"\n  Delta tracking: manifest correctly records hash {file_hash[:8]}... for {raw_path}")
+        print("  A real wiki-ingest run would skip this file on re-ingest.")

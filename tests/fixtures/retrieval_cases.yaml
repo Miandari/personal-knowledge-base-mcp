@@ -163,3 +163,27 @@ cases:
     k: 5
     tags: [sentiment-retrieval]
     notes: "Tests whether BM25 picks up 'critical' from frontmatter sentiment field + body text."
+
+# ══════════════════════════════════════════════════════════════════════
+# NEGATIVE CASES — expect NO meaningful results
+#
+# A system that returns everything for every query would pass all the
+# positive tests above. These verify it correctly returns nothing (or
+# only very low-scoring noise) for topics the vault has no knowledge of.
+# ══════════════════════════════════════════════════════════════════════
+
+negative_cases:
+  - query: "quantum computing breakthroughs and qubit error correction"
+    score_threshold: 0.4
+    tags: [negative]
+    notes: "Nothing in the vault is about quantum computing. Any result above threshold is a false positive."
+
+  - query: "cooking recipes for sourdough bread"
+    score_threshold: 0.3
+    tags: [negative]
+    notes: "Completely unrelated domain. Should return zero or near-zero results."
+
+  - query: "history of the Roman Empire and its fall"
+    score_threshold: 0.3
+    tags: [negative]
+    notes: "Another domain the vault has no content on. Tests that general-knowledge queries don't pull random wiki pages."
