@@ -35,7 +35,7 @@ The **active research frontier** as of Q2 2026 is extending practical LLM contex
 
 **MSA: Memory Sparse Attention for Efficient End-to-End Memory Model Scaling to 100M Tokens** — https://arxiv.org/abs/2603.23516
 
-From **EverMind**. First surfaced in the [[.raw/notion/2026-03-27.md|2026-03-27 briefing]] and was the top-trending HuggingFace paper at 2.24k↑, then 2.27k↑ by 2026-03-28 — sustained traction, not a one-day spike.
+From **EverMind**. First surfaced in the **March 27, 2026** daily AI briefing ([[.raw/notion/2026-03-27.md|2026-03-27 briefing]]) and was the top-trending HuggingFace paper at 2.24k↑, then 2.27k↑ by March 28 — sustained traction, not a one-day spike.
 
 Key architectural contributions:
 

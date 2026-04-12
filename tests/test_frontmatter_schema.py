@@ -36,8 +36,12 @@ def _extract_frontmatter(path: Path) -> dict | None:
 
 
 def _all_wiki_pages(vault_path: Path) -> list[Path]:
-    """Return all .md files under wiki/ (excluding .gitkeep)."""
-    return [p for p in (vault_path / "wiki").rglob("*.md") if p.name != ".gitkeep"]
+    """Return all .md files under wiki/ (excluding .gitkeep and hot.md).
+
+    hot.md is a cache, not a wiki page — it has no frontmatter by design.
+    """
+    excluded = {".gitkeep", "hot.md"}
+    return [p for p in (vault_path / "wiki").rglob("*.md") if p.name not in excluded]
 
 
 class TestFrontmatterPresence:

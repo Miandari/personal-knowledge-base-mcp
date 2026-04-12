@@ -35,7 +35,7 @@ Composable `SKILL.md`-based agent skills framework and opinionated software deve
 
 ## Observed growth
 
-- **2026-03-28** — **#1 trending on GitHub that day**, 2,293 stars/day, 120k total stars
+- **March 28, 2026** — **#1 trending on GitHub that day**, 2,293 stars/day, 120k total stars. The top trending repo on March 28 by a wide margin.
 - Sustained traction throughout the Q2 2026 [[agent-memory]] / skills-framework wave
 
 ## Why it matters

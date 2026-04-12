@@ -97,9 +97,12 @@ class VaultSandbox:
         """Query the sandbox's qmd collection."""
         import json
         result = subprocess.run(
-            ["qmd", "query", query, "-c", self.collection_name, "-n", str(n), "--json", "--no-rerank"],
+            ["qmd", "search", query, "-c", self.collection_name, "-n", str(n), "--json"],
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
             return []
-        return json.loads(result.stdout)
+        stdout = result.stdout.strip()
+        if not stdout:
+            return []
+        return json.loads(stdout)

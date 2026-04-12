@@ -141,7 +141,7 @@ class TestSandboxIngestion:
         assert sandbox.wiki_exists("sources/test-article.md")
 
     def test_sandbox_qmd_indexes_new_page(self, sandbox):
-        """Write a page, reindex, verify qmd finds it."""
+        """Write a page, reindex, verify qmd finds it via BM25."""
         sandbox.write_wiki(
             "concepts/test-concept.md",
             "---\ntype: concept\ntitle: Test Concept\ncreated: 2026-04-11\n"
@@ -150,9 +150,10 @@ class TestSandboxIngestion:
         )
         sandbox.qmd_update_and_embed()
         results = sandbox.qmd_query("banana quantum computing")
-        paths = [r.get("displayPath", r.get("path", "")) for r in results]
-        found = any("test-concept" in p for p in paths)
-        assert found, f"test-concept not found in qmd results: {paths}"
+        # Results are raw dicts with "file" key (qmd JSON format)
+        files = [r.get("file", "") for r in results]
+        found = any("test-concept" in f for f in files)
+        assert found, f"test-concept not found in qmd results: {files}"
 
 
 class TestContradictionDetection:
