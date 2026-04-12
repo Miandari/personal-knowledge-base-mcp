@@ -7,7 +7,7 @@ Runs against the live vault when TEST_USE_LIVE_VAULT=true.
 import os
 
 import pytest
-from lib.qmd_client import qmd_query, qmd_status
+from .lib.qmd_client import qmd_query, qmd_status
 
 
 class TestIndexHealth:

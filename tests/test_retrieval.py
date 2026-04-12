@@ -5,7 +5,7 @@ multiple qmd modes and checks that expected pages appear in the top-k.
 """
 
 import pytest
-from lib.qmd_client import qmd_query, precision_at_k, mrr
+from .lib.qmd_client import qmd_query, precision_at_k, mrr
 
 
 # Modes to test. Starts with the cheapest (BM25) and escalates.

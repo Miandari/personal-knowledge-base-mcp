@@ -12,8 +12,8 @@ Requires ANTHROPIC_API_KEY (or the configured judge's API key) in .env.
 import os
 
 import pytest
-from lib.llm_judge import get_judge, JudgeVerdict
-from lib.qmd_client import qmd_query, qmd_get
+from .lib.llm_judge import get_judge, JudgeVerdict
+from .lib.qmd_client import qmd_query, qmd_get
 
 # Skip the entire module if no API key is available
 pytestmark = pytest.mark.skipif(
