@@ -12,10 +12,10 @@ _project_root = Path(__file__).resolve().parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from kb.db import get_connection, init_schema
-from kb.indexer import Indexer
-from kb.embeddings import NoopEmbedding
-from kb.search import hybrid_search, fts_search
+from pkb.db import get_connection, init_schema
+from pkb.indexer import Indexer
+from pkb.embeddings import NoopEmbedding
+from pkb.search import hybrid_search, fts_search
 
 
 class VaultSandbox:
@@ -42,7 +42,7 @@ class VaultSandbox:
         shutil.copytree(
             self.source,
             self.vault_path,
-            ignore=shutil.ignore_patterns(".git", ".obsidian", "node_modules", ".qmd", "kb.db*"),
+            ignore=shutil.ignore_patterns(".git", ".obsidian", "node_modules", ".qmd", "pkb.db*"),
         )
 
         # Create a sandbox SQLite database

@@ -9,20 +9,20 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from kb.db import get_connection, init_schema
-from kb.search import (
+from pkb.db import get_connection, init_schema
+from pkb.search import (
     get_source_chain, get_derived_pages, get_neighborhood,
     get_stale_nodes, explore, get_node, get_node_summary,
 )
-from kb.embeddings import get_provider
-from kb import config
+from pkb.embeddings import get_provider
+from pkb import config
 
 
 @pytest.fixture(scope="module")
 def conn():
     """Live database connection."""
     if not config.DB_PATH.exists():
-        pytest.skip("No live database. Run `python -m kb rebuild` first.")
+        pytest.skip("No live database. Run `python -m pkb rebuild` first.")
     c = get_connection()
     yield c
     c.close()

@@ -15,13 +15,13 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from kb.db import get_connection, init_schema, reset_db
-from kb.indexer import (
+from pkb.db import get_connection, init_schema, reset_db
+from pkb.indexer import (
     Indexer, parse_markdown, file_md5, slug_from_path,
     extract_wikilinks, resolve_wikilink, chunk_body,
 )
-from kb.embeddings import NoopEmbedding
-from kb import config
+from pkb.embeddings import NoopEmbedding
+from pkb import config
 
 
 @pytest.fixture
@@ -36,9 +36,9 @@ def tmp_db(tmp_path):
 
 @pytest.fixture
 def live_db():
-    """Use the live vault database (requires `python -m kb rebuild`)."""
+    """Use the live vault database (requires `python -m pkb rebuild`)."""
     if not config.DB_PATH.exists():
-        pytest.skip("No live database. Run `python -m kb rebuild` first.")
+        pytest.skip("No live database. Run `python -m pkb rebuild` first.")
     conn = get_connection()
     yield conn
     conn.close()

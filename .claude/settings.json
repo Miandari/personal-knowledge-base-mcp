@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "kb": {
+    "pkb": {
       "command": "python",
-      "args": ["-m", "kb", "server"],
+      "args": ["-m", "pkb", "server"],
       "cwd": "."
     }
   },

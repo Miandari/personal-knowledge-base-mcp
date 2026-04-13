@@ -18,7 +18,7 @@ from .search import (
     list_nodes, get_status, explore, get_source_chain, get_derived_pages,
 )
 
-mcp = FastMCP("kb", instructions="""\
+mcp = FastMCP("pkb", instructions="""\
 Personal knowledge base tools. These access the user's PERSONAL compiled \
 wiki of notes, ingested articles, papers, and synthesis pages — NOT the \
 public internet. Topics include AI tooling, agent memory, MCP ecosystem, \
@@ -132,7 +132,7 @@ Returns node count, edge count, chunk count, embedding coverage percentage,
 stale page count, and orphan chunk count.
 
 Use this to verify the index is healthy before searching. If embedding
-coverage is below 100%, run `python -m kb rebuild` to fix it."""
+coverage is below 100%, run `python -m pkb rebuild` to fix it."""
 
 
 def _get_conn():

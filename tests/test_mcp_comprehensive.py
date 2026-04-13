@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from kb import config
-from kb.db import get_connection, init_schema
-from kb.embeddings import get_provider
-from kb.indexer import Indexer
-from kb.server import (
+from pkb import config
+from pkb.db import get_connection, init_schema
+from pkb.embeddings import get_provider
+from pkb.indexer import Indexer
+from pkb.server import (
     mcp,
     _KB_TOKEN,
     _SEARCH_DESC,
@@ -936,7 +936,7 @@ class TestHTTPTransport:
     def test_initialize_returns_server_info(self, http_client):
         resp = http_client.post("/mcp", json=self._INIT_PAYLOAD, headers=self._ACCEPT)
         r = _parse_sse_result(resp.text)
-        assert r["serverInfo"]["name"] == "kb"
+        assert r["serverInfo"]["name"] == "pkb"
         assert "protocolVersion" in r
 
     def test_session_id_in_headers(self, http_client):
@@ -1099,7 +1099,7 @@ class TestEdgeCases:
         assert _slugify("already-hyphenated") == "already-hyphenated"
 
     def test_kb_token_importable(self):
-        from kb.server import _KB_TOKEN
+        from pkb.server import _KB_TOKEN
 
         assert _KB_TOKEN is None or isinstance(_KB_TOKEN, str)
 

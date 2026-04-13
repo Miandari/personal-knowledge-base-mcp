@@ -1,4 +1,4 @@
-"""CLI: python -m kb rebuild [--force] [--dry-run] | server | status | search "..." """
+"""CLI: python -m pkb rebuild [--force] [--dry-run] | server | status | search "..." """
 
 import argparse
 import json
@@ -57,7 +57,7 @@ def cmd_rebuild(args):
 def cmd_status(args):
     """Show index health."""
     if not config.DB_PATH.exists():
-        print("No database found. Run `python -m kb rebuild` first.")
+        print("No database found. Run `python -m pkb rebuild` first.")
         sys.exit(1)
 
     conn = get_connection()
@@ -78,7 +78,7 @@ def cmd_status(args):
 def cmd_search(args):
     """Search the index."""
     if not config.DB_PATH.exists():
-        print("No database found. Run `python -m kb rebuild` first.")
+        print("No database found. Run `python -m pkb rebuild` first.")
         sys.exit(1)
 
     conn = get_connection()
@@ -145,7 +145,7 @@ def cmd_server(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="kb", description="compiled-knowledge-base CLI")
+    parser = argparse.ArgumentParser(prog="pkb", description="personal-knowledge-base CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # rebuild

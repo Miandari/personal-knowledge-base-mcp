@@ -14,9 +14,9 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from kb import config
-from kb.db import get_connection, init_schema
-from kb.server import (
+from pkb import config
+from pkb.db import get_connection, init_schema
+from pkb.server import (
     kb_search, kb_explore, kb_get, kb_list,
     kb_add, kb_synthesize, kb_reindex, kb_status,
 )
@@ -26,7 +26,7 @@ from kb.server import (
 def _require_db():
     """Skip all tests if no database exists."""
     if not config.DB_PATH.exists():
-        pytest.skip("No live database. Run `python -m kb rebuild` first.")
+        pytest.skip("No live database. Run `python -m pkb rebuild` first.")
 
 
 class TestKbSearch:
@@ -173,7 +173,7 @@ class TestKbAdd:
             assert expected_path.exists(), f"File not created at {expected_path}"
 
             # Verify it's indexed
-            from kb.search import get_node_summary
+            from pkb.search import get_node_summary
             conn = get_connection()
             try:
                 summary = get_node_summary(conn, "sources/test-mcp-add-page")

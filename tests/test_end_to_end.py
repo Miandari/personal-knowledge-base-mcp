@@ -20,8 +20,8 @@ class TestIndexHealth:
     """Verify the SQLite index is in a usable state."""
 
     def test_db_exists(self):
-        from kb import config
-        assert config.DB_PATH.exists(), f"No database at {config.DB_PATH}. Run `python -m kb rebuild` first."
+        from pkb import config
+        assert config.DB_PATH.exists(), f"No database at {config.DB_PATH}. Run `python -m pkb rebuild` first."
 
     def test_index_has_documents(self):
         status = kb_status()

@@ -6,7 +6,7 @@ from pathlib import Path
 VAULT_ROOT = Path(__file__).resolve().parent.parent
 WIKI_DIR = VAULT_ROOT / "wiki"
 RAW_DIR = VAULT_ROOT / ".raw"
-DB_PATH = VAULT_ROOT / "kb.db"
+DB_PATH = VAULT_ROOT / "pkb.db"
 
 # ── Embedding ──────────────────────────────────────────────────────────
 EMBEDDING_PROVIDER = "voyage"       # "voyage" | "noop"

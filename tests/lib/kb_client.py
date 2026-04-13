@@ -13,10 +13,10 @@ _project_root = Path(__file__).resolve().parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from kb.db import get_connection, init_schema
-from kb.search import hybrid_search, fts_search, get_node, get_status
-from kb.embeddings import get_provider
-from kb import config
+from pkb.db import get_connection, init_schema
+from pkb.search import hybrid_search, fts_search, get_node, get_status
+from pkb.embeddings import get_provider
+from pkb import config
 
 
 @dataclass
@@ -39,7 +39,7 @@ def _ensure_db() -> sqlite3.Connection:
     """Get a connection to the live DB, fail if it doesn't exist."""
     if not config.DB_PATH.exists():
         raise RuntimeError(
-            f"No database at {config.DB_PATH}. Run `python -m kb rebuild` first."
+            f"No database at {config.DB_PATH}. Run `python -m pkb rebuild` first."
         )
     return get_connection()
 
