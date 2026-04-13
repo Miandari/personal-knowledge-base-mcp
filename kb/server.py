@@ -18,17 +18,29 @@ from .search import (
     list_nodes, get_status, explore, get_source_chain, get_derived_pages,
 )
 
-mcp = FastMCP("kb", instructions="Knowledge base search and exploration tools.")
+mcp = FastMCP("kb", instructions="""\
+Personal knowledge base tools. These access the user's PERSONAL compiled \
+wiki of notes, ingested articles, papers, and synthesis pages — NOT the \
+public internet. Topics include AI tooling, agent memory, MCP ecosystem, \
+LLM context scaling, AI coding agents, and computational social science, \
+but the collection grows over time.
+
+Only use these tools when the user asks about their personal notes, KB, \
+wiki, or vault. Trigger phrases: "in my KB", "in my notes", "check my \
+vault", "what do I know about", "explore:", "query:", "kb:". For general \
+knowledge questions, prefer web search or your own training data.""")
 
 _KB_TOKEN = os.getenv("KB_MCP_TOKEN")
 
 # --- Tool description constants ---
 
 _SEARCH_DESC = """\
-Search the knowledge base using hybrid retrieval (FTS5 + vector + RRF).
+Personal KB tool. Search the user's personal knowledge base using hybrid
+retrieval (FTS5 + vector + RRF).
 
-Use this for finding information by topic, concept, or question. Returns
-ranked results with titles, types, scores, and snippets.
+Use this when the user asks to find something in their notes, wiki, or
+vault. Returns ranked results with titles, types, scores, and snippets
+from their curated collection.
 
 Results are ranked by Reciprocal Rank Fusion score. Only ordering matters —
 do not interpret raw score values as similarity percentages.
@@ -36,49 +48,59 @@ do not interpret raw score values as similarity percentages.
 Use "hybrid" mode (default) for best quality. Use "bm25" for exact keyword
 matching when you know the precise terms used in the KB.
 
+DO NOT use this for general knowledge questions — use web search instead.
 DO NOT use this for browsing — use kb_list instead.
 DO NOT use this if you already have a node ID — use kb_get instead.
 For structured exploration with staleness detection, use kb_explore."""
 
 _EXPLORE_DESC = """\
-Default entry point for topic exploration. Returns a synthesis page (if one
-exists), staleness indicators, unincorporated source pages, adjacent topics
-in the graph, and suggested next actions.
+Personal KB tool. Explore a topic in the user's personal knowledge base.
+Returns the synthesis page (if one exists), staleness indicators,
+unincorporated source pages, adjacent topics in the graph, and suggested
+next actions.
 
-Use this FIRST when investigating a topic. It tells you what the KB already
-knows, what's stale, and what's missing — so you can decide whether to search,
-synthesize, or ingest more.
+Use this when the user asks what they know about a topic, what they've
+read, or wants to explore their notes on a subject. It shows what the KB
+already knows, what's stale, and what's missing.
 
+DO NOT use this for general knowledge questions — use web search instead.
 DO NOT use this for raw keyword search — use kb_search instead.
 DO NOT use this to retrieve a specific page — use kb_get instead."""
 
 _GET_DESC = """\
-Retrieve full page content, metadata, and edges (sources, sourced_by, related).
+Personal KB tool. Retrieve full page content, metadata, and edges (sources,
+sourced_by, related) from the user's personal wiki.
 
-Use this after kb_search or kb_explore returns a node ID you want to read in
-full. Returns the complete markdown body plus frontmatter fields and graph edges.
+Use this after kb_search or kb_explore returns a node ID the user wants to
+read in full. Returns the complete markdown body plus frontmatter fields and
+graph edges.
 
 DO NOT guess node IDs — search or explore first to find valid IDs."""
 
 _LIST_DESC = """\
-Browse and filter pages by type, tag, or status. Returns summaries sorted by
-the chosen field. Use this for browsing, inventorying, or filtering the KB.
+Personal KB tool. Browse and filter pages in the user's personal wiki by
+type, tag, or status. Returns summaries sorted by the chosen field.
 
+Use this when the user wants to see what's in their KB — inventorying
+pages, filtering by topic area, or browsing recent additions.
+
+DO NOT use this for general knowledge questions — use web search instead.
 DO NOT use this for semantic search — use kb_search instead.
 DO NOT use this if you already have a node ID — use kb_get instead."""
 
 _ADD_DESC = """\
-Add a new page to the vault. Writes a markdown file with frontmatter and
-indexes it in SQLite immediately. The page is searchable right away.
+Personal KB tool. Add a new page to the user's personal wiki. Writes a
+markdown file with frontmatter and indexes it in SQLite immediately. The
+page is searchable right away.
 
 Does NOT trigger compilation — the caller decides when to compile.
 Does NOT fetch URLs — pass the content directly in the body parameter.
 Returns the indexed node summary on success."""
 
 _SYNTHESIZE_DESC = """\
-Assemble a synthesis/compilation prompt for rewriting a page. Returns a
-structured string containing the current page content, source pages to
-incorporate, and rewrite rules.
+Personal KB tool. Assemble a synthesis/compilation prompt for rewriting a
+page in the user's personal wiki. Returns a structured string containing
+the current page content, source pages to incorporate, and rewrite rules.
 
 This tool does NOT call an LLM — it returns context for the calling LLM to
 use when rewriting the page. After using the returned prompt to rewrite the
@@ -88,8 +110,8 @@ DO NOT call this without reading the result — it contains critical rewrite
 rules including the reindex requirement."""
 
 _REINDEX_DESC = """\
-Re-index a single file after writing or editing it. Updates FTS5, embeddings,
-and graph edges in the SQLite database.
+Personal KB tool. Re-index a single file after writing or editing it in the
+user's wiki. Updates FTS5, embeddings, and graph edges in the SQLite database.
 
 You MUST call this after every file write or edit during compilation. Without
 this, search results will be stale and graph edges will be wrong.
@@ -99,8 +121,9 @@ Do NOT run multiple kb_reindex calls in parallel — execute them sequentially
 to avoid SQLite database locking errors."""
 
 _STATUS_DESC = """\
-Index health check. Returns node count, edge count, chunk count, embedding
-coverage percentage, stale page count, and orphan chunk count.
+Personal KB tool. Health check for the user's personal knowledge base index.
+Returns node count, edge count, chunk count, embedding coverage percentage,
+stale page count, and orphan chunk count.
 
 Use this to verify the index is healthy before searching. If embedding
 coverage is below 100%, run `python -m kb rebuild` to fix it."""
