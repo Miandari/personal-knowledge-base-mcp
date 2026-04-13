@@ -38,20 +38,22 @@ _SEARCH_DESC = """\
 Personal KB tool. Search the user's personal knowledge base using hybrid
 retrieval (FTS5 + vector + RRF).
 
-Use this when the user asks to find something in their notes, wiki, or
-vault. Returns ranked results with titles, types, scores, and snippets
-from their curated collection.
+Use this when the user wants to find specific pages matching a query, or
+needs type/sentiment filters. Returns ranked results with titles, types,
+scores, and snippets from their curated collection.
+
+For general topic overviews ("kb: agent memory", "what do I know about X"),
+prefer kb_explore instead — it returns richer context (synthesis page,
+staleness, graph neighbors). Use kb_search when the user wants a ranked
+list of matching pages or when kb_explore didn't surface what they need.
 
 Results are ranked by Reciprocal Rank Fusion score. Only ordering matters —
-do not interpret raw score values as similarity percentages.
-
-Use "hybrid" mode (default) for best quality. Use "bm25" for exact keyword
-matching when you know the precise terms used in the KB.
+do not interpret raw score values as similarity percentages. Use "hybrid"
+mode (default) for best quality; "bm25" for exact keyword matching.
 
 DO NOT use this for general knowledge questions — use web search instead.
 DO NOT use this for browsing — use kb_list instead.
-DO NOT use this if you already have a node ID — use kb_get instead.
-For structured exploration with staleness detection, use kb_explore."""
+DO NOT use this if you already have a node ID — use kb_get instead."""
 
 _EXPLORE_DESC = """\
 Personal KB tool. Explore a topic in the user's personal knowledge base.
@@ -59,12 +61,16 @@ Returns the synthesis page (if one exists), staleness indicators,
 unincorporated source pages, adjacent topics in the graph, and suggested
 next actions.
 
-Use this when the user asks what they know about a topic, what they've
-read, or wants to explore their notes on a subject. It shows what the KB
-already knows, what's stale, and what's missing.
+This is the DEFAULT tool when the user asks about their KB. Use it for
+trigger phrases like "kb:", "in my KB", "what do I know about", "in my
+notes about", "explore:", "check my vault". It gives a structured overview
+of everything the KB knows about a topic.
+
+Prefer this over kb_search when the user wants a topic overview. Use
+kb_search instead only when the user wants to find specific pages matching
+a precise query or needs type/sentiment filters.
 
 DO NOT use this for general knowledge questions — use web search instead.
-DO NOT use this for raw keyword search — use kb_search instead.
 DO NOT use this to retrieve a specific page — use kb_get instead."""
 
 _GET_DESC = """\
