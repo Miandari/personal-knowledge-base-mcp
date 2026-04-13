@@ -22,6 +22,7 @@ node_modules/
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
 
 # SQLite database (derived, rebuildable from markdown)
 pkb.db

@@ -64,7 +64,7 @@ The wiki pages are the product. Everything else is infrastructure to build and s
 ### Install
 
 ```bash
-git clone https://github.com/mkfischer/personal-knowledge-base-mcp
+git clone https://github.com/Miandari/personal-knowledge-base-mcp
 cd personal-knowledge-base-mcp
 pip install -e .
 ```
