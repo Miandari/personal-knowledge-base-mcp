@@ -20,6 +20,91 @@ from .search import (
 
 mcp = FastMCP("kb", instructions="Knowledge base search and exploration tools.")
 
+_KB_TOKEN = os.getenv("KB_MCP_TOKEN")
+
+# --- Tool description constants ---
+
+_SEARCH_DESC = """\
+Search the knowledge base using hybrid retrieval (FTS5 + vector + RRF).
+
+Use this for finding information by topic, concept, or question. Returns
+ranked results with titles, types, scores, and snippets.
+
+Results are ranked by Reciprocal Rank Fusion score. Only ordering matters —
+do not interpret raw score values as similarity percentages.
+
+Use "hybrid" mode (default) for best quality. Use "bm25" for exact keyword
+matching when you know the precise terms used in the KB.
+
+DO NOT use this for browsing — use kb_list instead.
+DO NOT use this if you already have a node ID — use kb_get instead.
+For structured exploration with staleness detection, use kb_explore."""
+
+_EXPLORE_DESC = """\
+Default entry point for topic exploration. Returns a synthesis page (if one
+exists), staleness indicators, unincorporated source pages, adjacent topics
+in the graph, and suggested next actions.
+
+Use this FIRST when investigating a topic. It tells you what the KB already
+knows, what's stale, and what's missing — so you can decide whether to search,
+synthesize, or ingest more.
+
+DO NOT use this for raw keyword search — use kb_search instead.
+DO NOT use this to retrieve a specific page — use kb_get instead."""
+
+_GET_DESC = """\
+Retrieve full page content, metadata, and edges (sources, sourced_by, related).
+
+Use this after kb_search or kb_explore returns a node ID you want to read in
+full. Returns the complete markdown body plus frontmatter fields and graph edges.
+
+DO NOT guess node IDs — search or explore first to find valid IDs."""
+
+_LIST_DESC = """\
+Browse and filter pages by type, tag, or status. Returns summaries sorted by
+the chosen field. Use this for browsing, inventorying, or filtering the KB.
+
+DO NOT use this for semantic search — use kb_search instead.
+DO NOT use this if you already have a node ID — use kb_get instead."""
+
+_ADD_DESC = """\
+Add a new page to the vault. Writes a markdown file with frontmatter and
+indexes it in SQLite immediately. The page is searchable right away.
+
+Does NOT trigger compilation — the caller decides when to compile.
+Does NOT fetch URLs — pass the content directly in the body parameter.
+Returns the indexed node summary on success."""
+
+_SYNTHESIZE_DESC = """\
+Assemble a synthesis/compilation prompt for rewriting a page. Returns a
+structured string containing the current page content, source pages to
+incorporate, and rewrite rules.
+
+This tool does NOT call an LLM — it returns context for the calling LLM to
+use when rewriting the page. After using the returned prompt to rewrite the
+file, you MUST call kb_reindex on the rewritten file.
+
+DO NOT call this without reading the result — it contains critical rewrite
+rules including the reindex requirement."""
+
+_REINDEX_DESC = """\
+Re-index a single file after writing or editing it. Updates FTS5, embeddings,
+and graph edges in the SQLite database.
+
+You MUST call this after every file write or edit during compilation. Without
+this, search results will be stale and graph edges will be wrong.
+
+Accepts either file_path (relative to vault root or absolute) or node_id.
+Do NOT run multiple kb_reindex calls in parallel — execute them sequentially
+to avoid SQLite database locking errors."""
+
+_STATUS_DESC = """\
+Index health check. Returns node count, edge count, chunk count, embedding
+coverage percentage, stale page count, and orphan chunk count.
+
+Use this to verify the index is healthy before searching. If embedding
+coverage is below 100%, run `python -m kb rebuild` to fix it."""
+
 
 def _get_conn():
     """Get a DB connection, initializing schema if needed."""
@@ -34,7 +119,7 @@ def _get_provider(conn):
     return get_provider(provider_name, conn=conn)
 
 
-@mcp.tool()
+@mcp.tool(description=_SEARCH_DESC)
 def kb_search(
     query: str,
     limit: int = 10,
@@ -42,15 +127,7 @@ def kb_search(
     sentiment: str | None = None,
     mode: str = "hybrid",
 ) -> list[dict]:
-    """Hybrid FTS5 + vector search with Reciprocal Rank Fusion.
-
-    Args:
-        query: Natural-language search query.
-        limit: Max results (default 10).
-        type: Filter by node type (source, entity, concept, etc.).
-        sentiment: Filter by sentiment (critical, skeptical, neutral, etc.).
-        mode: "hybrid" (default) or "bm25" (keyword only).
-    """
+    """Hybrid FTS5 + vector search with Reciprocal Rank Fusion."""
     conn = _get_conn()
     filters = {}
     if type:
@@ -69,14 +146,9 @@ def kb_search(
         conn.close()
 
 
-@mcp.tool()
+@mcp.tool(description=_EXPLORE_DESC)
 def kb_explore(topic: str) -> dict:
-    """Interactive exploration: returns synthesis page, staleness, unincorporated sources,
-    adjacent topics, and suggested actions.
-
-    Args:
-        topic: Topic to explore (natural language or node ID).
-    """
+    """Interactive exploration of a topic."""
     conn = _get_conn()
     try:
         provider = _get_provider(conn)
@@ -86,13 +158,9 @@ def kb_explore(topic: str) -> dict:
         conn.close()
 
 
-@mcp.tool()
+@mcp.tool(description=_GET_DESC)
 def kb_get(node_id: str) -> dict | None:
-    """Get full page content + metadata + edges.
-
-    Args:
-        node_id: Node ID (e.g., "concepts/ai-coding-agents").
-    """
+    """Get full page content + metadata + edges."""
     conn = _get_conn()
     try:
         detail = get_node(conn, node_id)
@@ -101,7 +169,7 @@ def kb_get(node_id: str) -> dict | None:
         conn.close()
 
 
-@mcp.tool()
+@mcp.tool(description=_LIST_DESC)
 def kb_list(
     type: str | None = None,
     tag: str | None = None,
@@ -109,15 +177,7 @@ def kb_list(
     sort: str = "updated",
     limit: int = 50,
 ) -> list[dict]:
-    """Filtered/sorted listing of nodes. For browsing, not searching.
-
-    Args:
-        type: Filter by node type.
-        tag: Filter by tag.
-        status: Filter by status.
-        sort: Sort field: "updated", "created", or "title".
-        limit: Max results.
-    """
+    """Filtered/sorted listing of nodes."""
     conn = _get_conn()
     try:
         nodes = list_nodes(conn, type_filter=type, tag_filter=tag,
@@ -127,7 +187,7 @@ def kb_list(
         conn.close()
 
 
-@mcp.tool()
+@mcp.tool(description=_ADD_DESC)
 def kb_add(
     title: str,
     type: str,
@@ -138,20 +198,7 @@ def kb_add(
     sentiment: str = "",
     ingested_via: str = "manual",
 ) -> dict:
-    """Add a new page to the vault. Writes markdown + indexes in SQLite.
-
-    Does NOT trigger compilation. The caller decides when to compile.
-
-    Args:
-        title: Page title.
-        type: Page type (source, entity, concept, etc.).
-        body: Markdown body content.
-        source_url: Optional URL of the original source.
-        tags: Optional list of tags.
-        sources: Optional list of source node IDs.
-        sentiment: Optional sentiment (critical, skeptical, neutral, etc.).
-        ingested_via: Provenance (manual, notion_briefing, web_fetch, etc.).
-    """
+    """Add a new page to the vault."""
     tags = tags or []
     sources = sources or []
 
@@ -217,15 +264,9 @@ def kb_add(
         conn.close()
 
 
-@mcp.tool()
+@mcp.tool(description=_SYNTHESIZE_DESC)
 def kb_synthesize(node_id: str, source_ids: list[str] | None = None) -> str:
-    """Assemble a synthesis prompt. Returns structured context for the calling LLM
-    to rewrite the page. The MCP tool does NOT call an LLM.
-
-    Args:
-        node_id: The synthesis page to rewrite (or create).
-        source_ids: List of source node IDs to incorporate.
-    """
+    """Assemble a synthesis prompt for rewriting a page."""
     source_ids = source_ids or []
     conn = _get_conn()
     try:
@@ -262,21 +303,15 @@ Rewrite [[{node_id}]] to incorporate the following new sources.
 - Add each new source to the `sources: []` list in frontmatter.
 - If any new source contradicts existing content, add a > [!contradiction] callout.
 - Preserve the frontmatter schema (flat YAML, all required fields).
+- After writing the updated file to disk, you MUST immediately call kb_reindex(node_id="{node_id}") to update the search index. Do not proceed with other operations until reindexing completes.
 """
     finally:
         conn.close()
 
 
-@mcp.tool()
+@mcp.tool(description=_REINDEX_DESC)
 def kb_reindex(file_path: str = "", node_id: str = "") -> dict:
-    """Re-index a single file after the LLM writes/edits it.
-
-    Must be called after every file write during compilation.
-
-    Args:
-        file_path: Path to the file (relative to vault root or absolute).
-        node_id: Alternative: node ID to re-index.
-    """
+    """Re-index a single file after writing or editing it."""
     conn = _get_conn()
     try:
         if node_id and not file_path:
@@ -317,9 +352,9 @@ def kb_reindex(file_path: str = "", node_id: str = "") -> dict:
         conn.close()
 
 
-@mcp.tool()
+@mcp.tool(description=_STATUS_DESC)
 def kb_status() -> dict:
-    """Index health: page count, stale count, orphan count, embedding coverage."""
+    """Index health check."""
     conn = _get_conn()
     try:
         status = get_status(conn)

@@ -164,32 +164,29 @@ Steps:
 
 1. **Read** the source completely. Do not skim.
 2. **Discuss** key takeaways with the user. Ask: "What should I emphasize? How granular?" Skip this if the user says "just ingest it."
-3. **Create** source summary in `wiki/sources/`. Use the source frontmatter schema from `references/frontmatter.md`. In addition to the schema defaults, set these briefing-aware universal fields when applicable:
-   - `sentiment`: one of `critical | skeptical | neutral | mixed | enthusiastic` — your honest read of how the source frames its subject. Omit if genuinely neutral / N/A.
-   - `ingested_via`: one of `notion_briefing | manual | web_fetch | youtube_mcp` — how this source reached the vault.
-   - `briefing_date`: YYYY-MM-DD of the originating daily briefing, if the source was pulled from one. Omit otherwise.
-   These fields also propagate onto any entity / concept pages created from this source, so cross-briefing retrieval queries like "critical takes on X" still match.
-4. **Create or update** entity pages for every person, org, product, and repo mentioned. One page per entity.
-5. **Create or update** concept pages for significant ideas and frameworks.
-6. **Update** relevant domain page(s) and their `_index.md` sub-indexes.
-7. **Update** `wiki/overview.md` if the big picture changed.
-8. **Update** `wiki/index.md`. Add entries for all new pages.
-9. **Update** `wiki/hot.md` with this ingest's context.
-10. **Append** to `wiki/log.md` (new entries at the TOP):
+3. **Create the page** using `kb_add`:
+   - Determine `type` (source, entity, concept) from the content
+   - Extract `title`, `tags`, `sentiment`, `source_url` from the source
+   - Write the markdown body following the frontmatter schema from `references/frontmatter.md`
+   - Set these briefing-aware universal fields when applicable:
+     - `sentiment`: one of `critical | skeptical | neutral | mixed | enthusiastic` — your honest read of how the source frames its subject. Omit if genuinely neutral / N/A.
+     - `ingested_via`: one of `notion_briefing | manual | web_fetch | youtube_mcp` — how this source reached the vault.
+   - Call: `kb_add(title=..., type=..., body=..., tags=[...], source_url=..., sentiment=..., ingested_via=...)`
+   - `kb_add` writes the file AND indexes it immediately. The page is searchable right away.
+4. **Update `wiki/index.md`** — add an entry for the new page.
+5. **Append** to `wiki/log.md` (new entries at the TOP):
     ```markdown
     ## [YYYY-MM-DD] ingest | Source Title
     - Source: `.raw/articles/filename.md`
     - Summary: [[Source Title]]
-    - Pages created: [[Page 1]], [[Page 2]]
-    - Pages updated: [[Page 3]], [[Page 4]]
+    - Pages created: [[Page 1]]
     - Key insight: One sentence on what is new.
     ```
-11. **Check for contradictions.** If new info conflicts with existing pages, add `> [!contradiction]` callouts on both pages.
-12. **Refresh the SQLite search index** so the new / rewritten pages are searchable immediately:
-    ```bash
-    python3 -m kb rebuild || true
-    ```
-    This re-indexes all wiki pages into the SQLite database (FTS5 + vector embeddings). If the `kb` package is not installed, the command no-ops (`|| true`) — do not block the ingest on it.
+6. **Reindex meta pages** — you MUST execute these calls sequentially, one at a time. Do not run indexing tools in parallel (concurrent writes cause database locking errors):
+   - First: `kb_reindex(file_path="wiki/index.md")`
+   - Then: `kb_reindex(file_path="wiki/log.md")`
+7. **Check for contradictions** against existing pages. If found, add `> [!contradiction]` callouts on both pages. After editing any existing page, call `kb_reindex(file_path=...)` on it before proceeding.
+8. **Offer to explore**: "Added [[page-title]] as a seed page. Run `explore: <topic>` to see what it connects to and whether related concept pages need recompilation."
 
 ---
 
@@ -202,9 +199,8 @@ Steps:
 1. List all files to process. Confirm with user before starting.
 2. Process each source following the single ingest flow. Defer cross-referencing between sources until step 3.
 3. After all sources: do a cross-reference pass. Look for connections between the newly ingested sources.
-4. Update index, hot cache, and log once at the end (not per-source).
-5. **Refresh the SQLite search index ONCE** at the end of the batch: `python3 -m kb rebuild || true`
-6. Report: "Processed N sources. Created X pages, updated Y pages. Here are the key connections I found."
+4. Update index, hot cache, and log once at the end (not per-source). Reindex meta pages sequentially (one `kb_reindex` at a time — no parallel calls).
+5. Report: "Processed N sources. Created X pages, updated Y pages. Here are the key connections I found."
 
 Batch ingest is less interactive. For 30+ sources, expect significant processing time. Check in with the user after every 10 sources.
 

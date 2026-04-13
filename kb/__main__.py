@@ -114,8 +114,34 @@ def cmd_search(args):
 
 def cmd_server(args):
     """Start the MCP server."""
-    from .server import mcp
-    mcp.run()
+    from .server import mcp, _KB_TOKEN
+
+    if args.transport == "http":
+        import uvicorn
+        app = mcp.streamable_http_app()
+
+        # Bearer token auth (only for HTTP, when KB_MCP_TOKEN is set)
+        if _KB_TOKEN and not args.no_auth:
+            import secrets
+            from starlette.middleware.base import BaseHTTPMiddleware
+            from starlette.responses import JSONResponse
+
+            class BearerAuthMiddleware(BaseHTTPMiddleware):
+                async def dispatch(self, request, call_next):
+                    # Pass through CORS preflight — browsers send OPTIONS
+                    # without Authorization headers
+                    if request.method == "OPTIONS":
+                        return await call_next(request)
+                    auth = request.headers.get("Authorization", "")
+                    if not auth.startswith("Bearer ") or not secrets.compare_digest(auth[7:], _KB_TOKEN):
+                        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+                    return await call_next(request)
+
+            app.add_middleware(BearerAuthMiddleware)
+
+        uvicorn.run(app, host=args.host, port=args.port)
+    else:
+        mcp.run(transport="stdio")
 
 
 def main():
@@ -145,6 +171,12 @@ def main():
 
     # server
     p_server = subparsers.add_parser("server", help="Start MCP server")
+    p_server.add_argument("--transport", choices=["stdio", "http"], default="stdio",
+                          help="Transport: stdio (default) or http (Streamable HTTP)")
+    p_server.add_argument("--host", default="127.0.0.1", help="HTTP bind address")
+    p_server.add_argument("--port", type=int, default=8181, help="HTTP port")
+    p_server.add_argument("--no-auth", action="store_true",
+                          help="Disable auth even if KB_MCP_TOKEN is set")
     p_server.set_defaults(func=cmd_server)
 
     args = parser.parse_args()
