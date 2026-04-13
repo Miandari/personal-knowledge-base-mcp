@@ -1,12 +1,12 @@
 # compiled-knowledge-base — operating manual
 
-This is a **personal, general-purpose LLM Wiki** for mk. Anything worth remembering — articles, papers, videos, GitHub repos, books, voice notes, conversations, thoughts — can live here, get compiled into synthesized pages, and be retrieved later from any LLM-enabled tool that speaks MCP or a shell. It is built on claude-obsidian skills, a handful of thinking tools from obsidian-second-brain, and `qmd` hybrid search. It is simultaneously an Obsidian vault, a Claude Code project, and an MCP-accessible retrieval target. Read `CRITICAL_FACTS.md` for the ~120-token identity block that is always in context.
+This is a **personal, general-purpose LLM Wiki** for mk. Anything worth remembering — articles, papers, videos, GitHub repos, books, voice notes, conversations, thoughts — can live here, get compiled into synthesized pages, and be retrieved later from any LLM-enabled tool that speaks MCP or a shell. It is built on claude-obsidian skills, thinking tools from obsidian-second-brain, and a custom `kb` Python package (SQLite + FTS5 + sqlite-vec hybrid search with a DAG data model). It is simultaneously an Obsidian vault, a Claude Code project, and an MCP-accessible retrieval target. Read `CRITICAL_FACTS.md` for the ~120-token identity block that is always in context.
 
 ## What this vault is (and what it is not)
 
 **It is:**
 - **A general knowledge base.** The ingestion pipeline accepts URLs, blog posts, PDFs, images (with OCR), YouTube videos, audio files, raw text, pasted content, Notion pages, and anything else you can hand the `wiki-ingest` skill. There is nothing Notion-specific about the retrieval side.
-- **A multi-tool knowledge base.** The underlying store is plain markdown, so Obsidian.app, `grep`, any editor, and any LLM can read it directly. The hybrid-search layer (`qmd`) exposes itself as an MCP server over stdio (and HTTP on demand), so Claude Code, Claude Desktop, Cursor, Cline, Zed, or any other MCP-capable client can query the same index without re-ingesting anything.
+- **A multi-tool knowledge base.** The underlying store is plain markdown, so Obsidian.app, `grep`, any editor, and any LLM can read it directly. The `kb` MCP server (FastMCP over stdio) exposes hybrid search, graph traversal, and exploration tools, so Claude Code, Claude Desktop, Cursor, Cline, Zed, or any other MCP-capable client can query the same index.
 - **A compounding knowledge base.** Every ingest **rewrites** existing pages rather than just appending. The vault gets smarter, not just bigger.
 
 **It is not:**
@@ -34,10 +34,16 @@ This is a **personal, general-purpose LLM Wiki** for mk. Anything worth remember
   text/             raw pasted content, conversation dumps, etc.
   (add more subfolders as new source types emerge — the pipeline doesn't care)
 .claude/
-  skills/           wiki, wiki-ingest, wiki-query, wiki-lint, save, autoresearch, ...
+  skills/           wiki, wiki-ingest, kb, wiki-lint, save, autoresearch, ...
   commands/         /wiki /save /ingest-notion-briefing /challenge /synthesize /emerge /graduate /connect ...
-  settings.json     qmd MCP server + hooks (project-scoped)
-wiki/               the knowledge base — Claude-written, rewriteable, indexed by qmd
+  settings.json     kb MCP server + hooks (project-scoped)
+kb/                 Python package: SQLite backend, indexer, search, MCP server
+  schema.sql        all CREATE TABLE / INDEX / VIRTUAL TABLE statements
+  indexer.py        two-pass markdown → SQLite (nodes, edges, tags, chunks, FTS5, vec)
+  search.py         hybrid search (FTS5 + sqlite-vec + RRF), graph traversal, explore
+  server.py         FastMCP server: kb_search, kb_explore, kb_get, kb_add, etc.
+  embeddings.py     Voyage API / noop abstraction with caching
+wiki/               the knowledge base — Claude-written, rewriteable, indexed by kb
   hot.md            ~500-token hot cache, read first in every session
   index.md          master navigation
   log.md            append-only operation log (newest first)
@@ -50,7 +56,9 @@ wiki/               the knowledge base — Claude-written, rewriteable, indexed 
 _templates/         concept, entity, source, question, comparison
 hooks/              hook shell command sources
 bin/                resync + maintenance scripts
-tests/              (future) automated test suite for the KB itself
+tests/              automated test suite (114 tests: indexer, search, graph, MCP, ingestion, frontmatter)
+kb.db               SQLite database (gitignored, rebuildable from markdown via `python -m kb rebuild`)
+pyproject.toml      project deps: apsw, sqlite-vec, voyageai, mcp[cli], pydantic
 CRITICAL_FACTS.md   always-loaded identity block (~120 tokens)
 CLAUDE.md           this file
 ```
@@ -59,7 +67,9 @@ The `.raw/` subfolders are **conventions, not constraints**. `wiki-ingest` will 
 
 ## Core principle: compilation over retrieval
 
-When a new source comes in, **rewrite existing pages** to incorporate it. Do not just append a new page. A vault that only grows is a dumping ground; a vault that gets smarter with every ingest is a second brain. `wiki-ingest` enforces this — read its SKILL.md before ingesting anything substantial.
+When a new source comes in, **rewrite existing pages** to incorporate it. Do not just append a new page. A vault that only grows is a dumping ground; a vault that gets smarter with every ingest is a second brain.
+
+**Compilation is demand-driven, not automatic.** Ingestion adds pages and indexes them, but does NOT auto-rewrite related concept pages. Instead, `kb_explore` detects staleness (source pages updated after the concept was last compiled, or new semantically-related pages not yet in the concept's `sources:` list) and offers the user the choice to compile. This prevents the O(n) compilation cost that breaks at scale.
 
 The two-output rule: every answer also updates the vault. If you learned something in the current conversation worth remembering, file it (`/save` or write a wiki page directly).
 
@@ -81,7 +91,7 @@ Every ingest:
 3. Creates / rewrites entity pages, concept pages, and the source summary page
 4. Resolves contradictions with existing pages via `> [!contradiction]` callouts
 5. Updates `wiki/index.md`, `wiki/log.md`, `wiki/hot.md`
-6. Refreshes the `qmd` hybrid index so the new content is searchable immediately
+6. Refreshes the SQLite index (`python -m kb rebuild`) so the new content is searchable immediately
 
 Thin wrappers exist for specific common workflows and can be added freely. Current:
 
@@ -94,26 +104,47 @@ Any new ingestion wrapper is ~50 lines of glue: fetch the source, write `.raw/<t
 
 ## Retrieval protocol
 
-Use `wiki-query` for all non-trivial questions about the vault. It already knows how to try qmd first and fall back to plain file reads. **Do not** reach for `Grep` on `wiki/**` directly unless qmd is unavailable AND `wiki-query` is unavailable.
+Use the `kb` skill for all non-trivial questions about the vault. **Start with `kb_explore(topic)`** — it returns structured state (synthesis page, staleness, unincorporated sources, adjacent topics, suggested actions) that drives an interactive conversation. Fall back to `kb_search` for direct searches. **Do not** reach for `Grep` on `wiki/**` directly.
 
-For direct qmd calls when you're scripting:
+### MCP tools (via the `kb` server in `.claude/settings.json`)
+
+| Tool | Purpose |
+|---|---|
+| `kb_explore` | **Default entry point.** Returns synthesis page + staleness + graph context + suggestions |
+| `kb_search` | Hybrid FTS5 + sqlite-vec search with RRF. Supports type/sentiment filters |
+| `kb_get` | Full page content + metadata + edges (sources, sourced_by, related) |
+| `kb_list` | Filtered/sorted listing by type, tag, or status |
+| `kb_add` | Create a new page (writes file + indexes in SQLite) |
+| `kb_synthesize` | Assemble a compilation prompt (does NOT call an LLM — returns context for the calling LLM) |
+| `kb_reindex` | Re-index a single file after editing it (call after every file write during compilation) |
+| `kb_status` | Index health: node count, edge count, chunk count, embedding coverage, stale count |
+
+### CLI (for scripting and maintenance)
 
 ```bash
-qmd query "<natural-language question>" -c kb --json -n 15
-qmd get "#<docid>" --full
+python -m kb rebuild [--force] [--dry-run] [--no-embed]  # index wiki/ into SQLite
+python -m kb search "natural language query" [--mode bm25|hybrid] [--json]
+python -m kb status
+python -m kb server  # start MCP server (stdio)
 ```
 
-Or via the MCP server — tools `mcp__qmd__query`, `mcp__qmd__get`, `mcp__qmd__multi_get`, `mcp__qmd__status`.
+### Multi-client access
 
-**Multi-client access.** The qmd MCP server is the single source of truth for retrieval, regardless of which tool you're calling from:
+The `kb` MCP server is the single source of truth for retrieval:
 
 - **Claude Code** (this project) — wired via vault `.claude/settings.json`
-- **Claude Desktop** — add `{"mcpServers": {"qmd": {"command": "qmd", "args": ["mcp"]}}}` to `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Cursor / Cline / Zed / any MCP client** — same one-line config
-- **HTTP / remote** — `qmd mcp --http --daemon` exposes it on `localhost:8181` for MCP Streamable HTTP clients
-- **Shell / scripts / cron** — `qmd query "..." --json` from any shell
+- **Claude Desktop** — `{"mcpServers": {"kb": {"command": "python", "args": ["-m", "kb", "server"], "cwd": "/path/to/vault"}}}`
+- **Cursor / Cline / Zed / any MCP client** — same config pattern
+- **Shell / scripts / cron** — `python -m kb search "..." --json`
 
-The wiki is also **plain markdown**, so even without qmd any LLM that can read files can work against this KB directly.
+The wiki is also **plain markdown**, so even without the kb package any LLM that can read files can work against this KB directly.
+
+### Architecture notes
+
+- **SQLite is derived, not canonical.** Markdown files are source of truth. `kb.db` is rebuildable via `python -m kb rebuild --force`.
+- **DAG data model.** Nodes + edges, no fixed layers. `sources:` in frontmatter = edges. `sourced_by` is computed in SQL. Depth is emergent.
+- **Chunk-level embeddings.** Long pages embed as multiple ~500-token chunks (Voyage 3.5, 1024-dim). Search retrieves the best chunk, returns the parent page.
+- **apsw, not stdlib sqlite3.** macOS system Python ships without `enable_load_extension`, which sqlite-vec requires. apsw provides its own SQLite build.
 
 ## Hot cache protocol
 
@@ -160,7 +191,7 @@ Omit optional fields rather than leaving them blank. `sentiment: ""` is worse th
 | Command | What it does |
 |---|---|
 | `ingest <file-or-url>` | Generic ingest via `wiki-ingest` — URLs, files, images, YouTube, audio, pasted text |
-| `query: <question>` | Retrieval via `wiki-query` (qmd-first hybrid search) |
+| `explore: <topic>` / `query: <question>` | Retrieval via `kb` skill (explore-first, then hybrid search) |
 | `/save` | File current conversation as a wiki note |
 | `/wiki` | Scaffold / route to sub-skills, health status |
 
@@ -191,6 +222,7 @@ Omit optional fields rather than leaving them blank. `sentiment: ""` is worse th
 
 ## When you're stuck
 
-- Thin retrieval results? Check `qmd status`, make sure `qmd embed` has run after the most recent ingest.
-- Pages aren't showing up in `/query`? They may have been written under `.raw/` (not indexed) or under a hidden folder. qmd's collection is `wiki/` only.
+- Thin retrieval results? Check `python -m kb status` — verify embedding coverage is 100%. If not, run `python -m kb rebuild`.
+- Pages aren't showing up in search? They may have been written under `.raw/` (not indexed) or under a hidden folder. Only `wiki/` pages are in the search index. Run `python -m kb rebuild` after adding new pages.
+- Need to force a full re-index? `python -m kb rebuild --force` drops the database and re-indexes everything from scratch.
 - Hooks not firing? Check `.claude/settings.json` in the vault. The plugin-STDOUT bug (`anthropics/claude-code#10875`) only affects hooks distributed via `.claude-plugin/` — our hooks are vault-scoped, so they're fine.
