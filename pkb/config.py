@@ -20,13 +20,21 @@ def set_vault_root(path: Path) -> None:
     DB_PATH = VAULT_ROOT / "pkb.db"
 
 
+DEFAULT_VAULT_PATH = Path.home() / "pkb-vault"
+
+
 def _discover_vault_root() -> Path:
-    """CLI arg (already set via set_vault_root) > env var > cwd."""
+    """CLI arg (already set via set_vault_root) > env var > cwd (if vault) > default."""
     if _vault_root_override:
         return _vault_root_override
     if env := os.getenv("PKB_VAULT_ROOT"):
         return Path(env).resolve()
-    return Path.cwd()
+    # If cwd looks like a vault, use it
+    cwd = Path.cwd()
+    if (cwd / "wiki").is_dir():
+        return cwd
+    # Default location
+    return DEFAULT_VAULT_PATH
 
 
 VAULT_ROOT = _discover_vault_root()

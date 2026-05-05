@@ -1,63 +1,93 @@
-# pkb — project rules
+# pkb-mcp — development rules
 
-Personal knowledge base MCP server. See @README.md for architecture and design rationale.
-User context is in auto-memory (`~/.claude/projects/.../memory/`).
+Installable personal knowledge base MCP server. See @README.md for architecture.
 
-## Key directories
+## Repo structure
 
-- `.raw/` — **immutable** source material. Never edit after first write.
-- `wiki/` — compiled knowledge. Rewriteable. This is the product.
-- `pkb/` — Python package (SQLite backend, indexer, search, MCP server).
-- `.claude/skills/` — copies of upstream repos. Use `bin/resync-claude-obsidian.sh` to update.
+This is the **software repo**, not a vault. Personal wiki content lives in a separate vault directory.
 
-## Core rules
+- `pkb/` — Python package (server, indexer, search, models, schema)
+- `pkb/templates/` — vault scaffolding, copied by `pkb init`
+- `tests/` — test suite (242 tests, sandbox-based)
+- `tests/fixtures/sample_vault/` — sample vault with 17 pages (test fixture + demo)
+- `scripts/` — migration and utility scripts
 
-1. **Retrieval**: use `kb_explore` first, then `kb_search`. Never grep `wiki/**` for search/retrieval — use the MCP tools. Direct file reads for editing are fine.
-2. **Compilation is demand-driven.** Ingestion adds pages and indexes them. Do NOT auto-rewrite concept pages — `kb_explore` detects staleness and the user decides when to compile.
-3. **Two-output rule**: if you learned something worth remembering, file it (`/save` or wiki page).
-4. **Preserve Obsidian compatibility**: wikilinks, flat YAML frontmatter, don't break `.obsidian/` or `_templates/`.
-5. **Always reindex after writes.** After every Edit/Write to a `wiki/` file, call `kb_reindex` on that file before doing anything else. Skipping this is the #1 cause of stale search results.
-6. **Sequential reindex**: never run `kb_reindex` calls in parallel — SQLite locking errors.
+## Key concepts
 
-## Frontmatter
+- **Vault**: a directory with `wiki/`, `.raw/`, `pkb.db`, and config files. Created by `pkb init`.
+- **Origin**: provenance of a page — `webpage | paper | conversation | note | book | transcript | meta`. NOT structural role.
+- **Structural role is emergent**: synthesis candidates detected by graph structure (outgoing source edges + `## Synthesis` section), not by declared origin.
+- **Edge types**: `source`, `related`, `link` (all singular).
+- **Flat vault**: all pages at `wiki/` root, no subdirectories. Node IDs are flat slugs (`agent-memory`).
+- **Wikilinks are pathless**: `[[agent-memory]]` not `[[concepts/agent-memory]]`.
 
-Full schema: `.claude/skills/wiki/references/frontmatter.md`. Key vault-specific fields:
+## Frontmatter schema
 
-- `sentiment` — `critical | skeptical | neutral | mixed | enthusiastic`. Set when a source takes a stance.
-- `ingested_via` — `notion_briefing | manual | web_fetch | youtube_mcp`.
-- `briefing_date` — originating briefing day (if from a daily briefing).
+```yaml
+title: "Page title"
+origin: note
+status: developing
+ingested_via: manual
+aliases:
+  - "Old Name"
+tags:
+  - topic
+related:
+  - "[[other-page]]"
+sources:
+  - "[[wiki-source-page]]"
+raw_sources:
+  - ".raw/notion/2026-04-10.md"
+created_at: 2026-05-05
+updated_at: 2026-05-05
+```
 
-Omit optional fields rather than leaving them blank.
-
-## Hot cache
-
-- `wiki/hot.md` loads at session start and after compaction (via hooks).
-- The `Stop` hook prints `WIKI_CHANGED: ...` when wiki files were modified. When you see that message, **rewrite `wiki/hot.md` completely** with `Last Updated`, `Key Recent Facts`, `Recent Changes`, `Active Threads`. Overwrite, don't append. Under 500 words.
-
-## Auto-commit
-
-A PostToolUse hook runs `git add wiki/ .raw/ && git commit` after every Write/Edit. Don't commit `wiki/` manually during ingests. For structural changes (skills, schema, this file), commit manually with a real message.
+- `sources:` — graph edges to other wiki pages (used by explore/synthesis detection)
+- `raw_sources:` — provenance pointers to `.raw/` files (NOT graph edges)
+- `aliases:` — stored in frontmatter so they survive `pkb rebuild --force`
+- Omit optional fields rather than leaving them blank.
 
 ## CLI
 
 ```bash
-python -m pkb rebuild [--force] [--no-embed]  # rebuild index from markdown
-python -m pkb status                           # check index health
-python -m pkb search "query" [--mode bm25]     # test search
-python -m pkb server                           # start MCP server (stdio)
-python -m pkb server --transport http --port 8181  # HTTP transport
+pkb init ~/my-vault                              # scaffold a new vault
+pkb --vault ~/my-vault rebuild [--force]          # rebuild index
+pkb --vault ~/my-vault status                     # check health
+pkb --vault ~/my-vault search "query"             # test search
+pkb --vault ~/my-vault server                     # start MCP server (stdio)
+pkb --vault ~/my-vault server --transport http     # HTTP transport
+```
+
+Vault discovery: `--vault` CLI arg > `PKB_VAULT_ROOT` env var > current directory.
+
+## MCP client configuration
+
+```json
+{
+  "mcpServers": {
+    "pkb": {
+      "command": "/path/to/.venv/bin/pkb",
+      "args": ["--vault", "/path/to/my-vault", "server"],
+      "env": {
+        "VOYAGE_API_KEY": "your-key-here"
+      }
+    }
+  }
+}
 ```
 
 ## Testing
 
 ```bash
 pip install -e ".[test]"
-python -m pytest tests/ -v                     # full suite (231 tests)
+python -m pytest tests/ -v                     # full suite (242 tests)
 python -m pytest tests/test_mcp_comprehensive.py -v  # MCP tools + HTTP + auth
 ```
 
+Tests use `tests/fixtures/sample_vault/` as source data. The sample vault needs a built index — run `pkb --vault tests/fixtures/sample_vault rebuild --force` if search/synthesis tests fail.
+
 ## Troubleshooting
 
-- Low/zero search results → `python -m pkb status`, check embedding coverage. Run `python -m pkb rebuild` if needed.
-- Pages not in search → only `wiki/` is indexed. Files in `.raw/` are not. Run `python -m pkb rebuild`.
-- Force full re-index → `python -m pkb rebuild --force`.
+- Search tests fail with embedding errors → set `VOYAGE_API_KEY` and rebuild sample vault index
+- `pkb` command not found → `pip install -e .`
+- Import errors → make sure you're in the venv: `source .venv/bin/activate`

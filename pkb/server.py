@@ -147,8 +147,32 @@ Use this to verify the index is healthy before searching. If embedding
 coverage is below 100%, run `python -m pkb rebuild` to fix it."""
 
 
+_NO_VAULT_MSG = (
+    "No vault found. To get started:\n\n"
+    "1. Run: pkb init ~/my-knowledge-base\n"
+    "2. Set your VOYAGE_API_KEY in ~/my-knowledge-base/.env\n"
+    "3. Run: pkb --vault ~/my-knowledge-base rebuild\n"
+    "4. Update your MCP config:\n"
+    '   {"command": "pkb", "args": ["--vault", "~/my-knowledge-base", "server"]}\n'
+    "5. Restart your MCP client."
+)
+
+
+def _check_vault():
+    """Check if a vault exists. Returns error dict if not, None if OK."""
+    if not config.WIKI_DIR.is_dir():
+        return {"error": _NO_VAULT_MSG}
+    return None
+
+
+class VaultNotFoundError(Exception):
+    pass
+
+
 def _get_conn():
     """Get a DB connection, initializing schema if needed."""
+    if not config.WIKI_DIR.is_dir():
+        raise VaultNotFoundError(_NO_VAULT_MSG)
     conn = get_connection()
     init_schema(conn)
     return conn

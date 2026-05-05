@@ -30,12 +30,12 @@ Every tool in this space makes you choose:
 
 The knowledge structure is a DAG where depth emerges naturally: a page synthesizing 5 sources is depth 1, a page synthesizing 3 synthesis pages is depth 2. No fixed layers. The things you never ask about stay as searchable raw sources — and that's fine.
 
-Built on SQLite + FTS5 + sqlite-vec + Voyage embeddings + FastMCP. Single-file database. Zero ops. Runs locally. Also an [Obsidian](https://obsidian.md) vault — browse your wiki with wikilinks and backlinks. Obsidian's graph view shows the wikilink connections between pages; the full DAG edges (sources, related) live in SQLite and are traversed via `kb_explore`.
+Built on SQLite + FTS5 + sqlite-vec + Voyage embeddings + FastMCP. Single-file database. Zero ops. Runs locally. Also an [Obsidian](https://obsidian.md) vault — browse your wiki with wikilinks and backlinks.
 
 ## Architecture
 
 ```
-                    wiki/**/*.md  <-- THE PRODUCT
+                    wiki/*.md  <-- THE PRODUCT
                     Living synthesis pages with frontmatter,
                     wikilinks, and DAG structure
                          ^ write (compile)     | read (index)
@@ -64,36 +64,43 @@ The wiki pages are the product. Everything else is infrastructure to build and s
 ### Install
 
 ```bash
+pip install pkb-mcp
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/Miandari/personal-knowledge-base-mcp
 cd personal-knowledge-base-mcp
 pip install -e .
 ```
 
-Requires Python 3.11+ and a [Voyage AI](https://www.voyageai.com/) API key (free tier: 200M tokens/month). Native dependencies (`apsw`, `sqlite-vec`) are handled by pip.
+Requires Python 3.11+ and a [Voyage AI](https://www.voyageai.com/) API key (free tier: 200M tokens/month).
 
-### Build the index
+### Create a vault
 
 ```bash
-export VOYAGE_API_KEY=your-key-here
-python -m pkb rebuild          # index all wiki pages + embed
-python -m pkb status           # check health
-python -m pkb search "agent memory"  # test a query
+pkb init ~/my-knowledge-base
+cd ~/my-knowledge-base
+cp .env.example .env
+# Edit .env — set your VOYAGE_API_KEY
+pkb rebuild
 ```
 
-If this is a fresh clone with an empty `wiki/` directory, add some pages first — either manually or by connecting an LLM client and using `kb_add`.
+`pkb init` scaffolds everything: wiki directory, Obsidian config, Claude Code skills, auto-commit hooks, and a starter index page. If you skip this step and try to use the MCP tools, they'll return clear setup instructions.
 
 ### Connect an LLM client
 
-**Claude Desktop / Claude Code** (stdio — recommended for local use):
+**Claude Desktop** (stdio — recommended):
 
-Add to `claude_desktop_config.json` or `.claude/settings.json`:
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "pkb": {
-      "command": "bash",
-      "args": ["-c", "cd /path/to/personal-knowledge-base-mcp && python3 -m pkb server"],
+      "command": "/path/to/.venv/bin/pkb",
+      "args": ["--vault", "/Users/you/my-knowledge-base", "server"],
       "env": {
         "VOYAGE_API_KEY": "your-key-here"
       }
@@ -104,10 +111,19 @@ Add to `claude_desktop_config.json` or `.claude/settings.json`:
 
 The client manages the server lifecycle — no terminal to babysit.
 
+**Claude Code** (auto-configured by `pkb init`):
+
+```bash
+cd ~/my-knowledge-base
+claude
+```
+
+The vault's `.claude/settings.json` already configures the MCP server.
+
 **Cursor / HTTP clients** (Streamable HTTP — for remote access or multi-client):
 
 ```bash
-python -m pkb server --transport http --port 8181
+pkb --vault ~/my-knowledge-base server --transport http --port 8181
 ```
 
 ```json
@@ -134,7 +150,7 @@ The `kb:` prefix or phrases like "my KB", "my notes", "my wiki" signal the LLM t
 
 Knowledge enters from anywhere — articles, papers, YouTube transcripts, or conversations with LLMs.
 
-**From a conversation:** You're chatting with Claude about a paper. You say "add the key insights about RAPTOR to my KB." The LLM calls `kb_add`, writes a wiki page with frontmatter and tags, embeds it, and it's immediately searchable. This works from Claude.ai, Claude Desktop, or any MCP client — your wiki is accessible from every conversation, not just the one where you added the content.
+**From a conversation:** You're chatting with Claude about a paper. You say "add the key insights about RAPTOR to my KB." The LLM calls `kb_add`, writes a wiki page with frontmatter and tags, embeds it, and it's immediately searchable. When adding, the system returns `suggested_related` — existing pages that are semantically similar — so the LLM can offer to link them.
 
 **From a URL:** "Add this article to my KB: https://..." — the LLM fetches, summarizes, and calls `kb_add`.
 
@@ -142,14 +158,16 @@ Knowledge enters from anywhere — articles, papers, YouTube transcripts, or con
 
 Nothing is compiled automatically. Sources sit as searchable leaf nodes until you explore a topic and decide to synthesize them.
 
-## The explore -> compile loop
+## The explore → compile loop
 
-1. You ask about a topic -> LLM calls `kb_explore("agent memory")`
+1. You ask about a topic → LLM calls `kb_explore("agent memory")`
 2. System returns the synthesis page (if one exists), whether it's stale, new sources not yet incorporated, adjacent topics, and suggested actions
 3. LLM presents this conversationally: *"Your agent memory page was last updated April 11. Three new sources arrived since. Want me to incorporate them?"*
-4. You say yes -> LLM calls `kb_synthesize`, gets back a structured prompt with the existing page + source pages + rewrite rules, then rewrites the page
-5. LLM saves the file and calls `kb_reindex` -> index is immediately up to date
+4. You say yes → LLM calls `kb_synthesize`, gets back a structured prompt with the synthesis section + source pages + rewrite rules + available wikilink slugs, then rewrites the synthesis section
+5. LLM saves the file and calls `kb_reindex` → index is immediately up to date
 6. Next time you explore, it's fresh
+
+Synthesis detection is graph-based: any page with outgoing source edges or a `## Synthesis` section is a candidate, regardless of its `origin` field. This means a page can organically grow into a synthesis hub without being declared as one upfront.
 
 ## MCP tools
 
@@ -158,21 +176,23 @@ Nothing is compiled automatically. Sources sit as searchable leaf nodes until yo
 | `kb_search` | Hybrid FTS5 + vector search with Reciprocal Rank Fusion |
 | `kb_explore` | Exploration: synthesis page + staleness + unincorporated sources + adjacent topics |
 | `kb_get` | Full page content + metadata + DAG edges |
-| `kb_list` | Browse/filter pages by type, tag, status |
-| `kb_add` | Add a new page — writes markdown + indexes + embeds, does NOT compile |
-| `kb_synthesize` | Assemble a synthesis prompt — returns context, does NOT call an LLM |
+| `kb_list` | Browse/filter pages by origin, tag, status |
+| `kb_add` | Add a new page — writes markdown + indexes + embeds + suggests related pages |
+| `kb_synthesize` | Assemble a synthesis prompt — returns context for the `## Synthesis` section only |
 | `kb_reindex` | Re-index a single file after edit — must be called after any file write |
 | `kb_status` | Index health: node count, edge count, embedding coverage, stale count |
 
 ## Data model
 
-Every page is a **node**. Nodes link via **edges** with three types:
+Every page is a **node** with an `origin` field describing its provenance (`webpage`, `paper`, `conversation`, `note`, `book`, `transcript`, `meta`). Nodes link via **edges** with three types:
 
-- **sources** — "this page was built from these" (frontmatter `sources: []`)
+- **source** — "this page was built from these" (frontmatter `sources: []`)
 - **related** — "this page is related to these" (frontmatter `related: []`)
-- **wikilink** — "this page mentions that page" (extracted from `[[inline links]]`)
+- **link** — "this page mentions that page" (extracted from `[[inline wikilinks]]`)
 
-No fixed layers. Depth is emergent. Staleness is detected two ways: known sources updated after last compile (SQL), and new semantically related pages not yet in the sources list (detected during `kb_explore`).
+No fixed layers. Depth is emergent. Structural role (synthesis hub, leaf, source authority) is computed from graph structure at query time — never stored or declared.
+
+Staleness is detected two ways: known sources updated after last compile (SQL), and new semantically related pages not yet in the sources list (detected during `kb_explore`). Pages that explicitly declare `related: [[concept-page]]` always surface as unincorporated sources when that concept is explored.
 
 ## Design philosophy
 
@@ -182,9 +202,23 @@ No fixed layers. Depth is emergent. Staleness is detected two ways: known source
 
 **Demand-driven, not push-based.** Push compilation is O(n) per ingest. Pull compilation is O(1) per request. This is the scalability insight.
 
-**Markdown is source of truth.** SQLite is derived. Edit in any text editor, `python -m pkb rebuild` to sync. The wiki is also a valid Obsidian vault — open it in Obsidian.app for wikilink navigation and backlinks. (Obsidian sees `[[wikilinks]]` in the markdown; the richer DAG edges are in SQLite.)
+**Markdown is source of truth.** SQLite is derived. Edit in any text editor, `pkb rebuild` to sync. The wiki is also a valid Obsidian vault — open it in Obsidian.app for wikilink navigation and backlinks.
 
 **MCP-native.** Not locked to one client. Works with Claude.ai, Claude Code, Claude Desktop, Cursor, or anything that speaks MCP.
+
+**Vault and package are separate.** Install pkb once, create as many vaults as you want. Each vault is a self-contained directory with markdown files, an Obsidian config, and a SQLite index. No code lives in the vault.
+
+## CLI
+
+```bash
+pkb init ~/my-vault                        # scaffold a new vault
+pkb --vault ~/my-vault rebuild [--force]   # rebuild index
+pkb --vault ~/my-vault status              # check health
+pkb --vault ~/my-vault search "query"      # test search
+pkb --vault ~/my-vault server              # start MCP server (stdio)
+```
+
+Vault discovery: `--vault` CLI arg > `PKB_VAULT_ROOT` env var > current directory.
 
 ## Testing
 
@@ -193,7 +227,7 @@ pip install -e ".[test]"
 python -m pytest tests/ -v
 ```
 
-231 tests covering the indexer, search (FTS5 + hybrid), graph traversal, all 8 MCP tools, HTTP transport, auth middleware, end-to-end workflows, frontmatter schema validation, and LLM-judge synthesis quality.
+242 tests covering the indexer, search (FTS5 + hybrid), graph traversal, all 8 MCP tools, HTTP transport, auth middleware, end-to-end workflows, frontmatter schema validation, and LLM-judge synthesis quality. Tests use a sample vault (`tests/fixtures/sample_vault/`) as the source fixture.
 
 ## Tech stack
 
