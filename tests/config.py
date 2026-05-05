@@ -9,8 +9,8 @@ Secrets (API keys) live in .env at vault root and are gitignored.
 from pathlib import Path
 
 # -- Vault ------------------------------------------------------------
-# Derived from the repo layout: tests/ is one level below the vault root.
-VAULT_PATH = Path(__file__).resolve().parent.parent
+# Sample vault for tests — lives in tests/fixtures/sample_vault/
+VAULT_PATH = Path(__file__).resolve().parent / "fixtures" / "sample_vault"
 
 # -- LLM judge --------------------------------------------------------
 # Which provider to use for LLM-as-judge grading.

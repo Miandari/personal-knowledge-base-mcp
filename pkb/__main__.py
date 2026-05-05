@@ -1,28 +1,33 @@
-"""CLI: python -m pkb rebuild [--force] [--dry-run] | server | status | search "..." """
+"""CLI: pkb [--vault PATH] rebuild|server|status|search|init"""
 
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-# Load .env from vault root
-_vault_root = Path(__file__).resolve().parent.parent
-_env_file = _vault_root / ".env"
-if _env_file.exists():
-    load_dotenv(_env_file)
-
 from . import config
-from .db import get_connection, init_schema, reset_db
-from .indexer import Indexer
-from .embeddings import get_provider
-from .search import hybrid_search, fts_search, get_status
+
+
+def _load_env():
+    """Load .env from vault root if it exists."""
+    env_file = config.VAULT_ROOT / ".env"
+    if env_file.exists():
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(env_file)
+        except ImportError:
+            pass
 
 
 def cmd_rebuild(args):
     """Rebuild the SQLite index from wiki/ markdown files."""
+    _load_env()
+    from .db import get_connection, init_schema, reset_db
+    from .indexer import Indexer
+    from .embeddings import get_provider
+
     if args.force:
         print("Force rebuild: dropping and recreating database...")
         conn = reset_db()
@@ -30,7 +35,6 @@ def cmd_rebuild(args):
         conn = get_connection()
         init_schema(conn)
 
-    # Choose embedding provider
     provider_name = "noop" if args.no_embed else config.EMBEDDING_PROVIDER
     provider = get_provider(provider_name, conn=conn)
 
@@ -56,8 +60,12 @@ def cmd_rebuild(args):
 
 def cmd_status(args):
     """Show index health."""
+    _load_env()
+    from .db import get_connection
+    from .search import get_status
+
     if not config.DB_PATH.exists():
-        print("No database found. Run `python -m pkb rebuild` first.")
+        print(f"No database found at {config.DB_PATH}. Run `pkb rebuild` first.")
         sys.exit(1)
 
     conn = get_connection()
@@ -77,23 +85,27 @@ def cmd_status(args):
 
 def cmd_search(args):
     """Search the index."""
+    _load_env()
+    from .db import get_connection
+    from .search import hybrid_search, fts_search
+    from .embeddings import get_provider
+
     if not config.DB_PATH.exists():
-        print("No database found. Run `python -m pkb rebuild` first.")
+        print(f"No database found at {config.DB_PATH}. Run `pkb rebuild` first.")
         sys.exit(1)
 
     conn = get_connection()
 
-    # Determine search mode
     filters = {}
-    if args.type:
-        filters["origin"] = args.type
+    if args.origin:
+        filters["origin"] = args.origin
     if args.sentiment:
         filters["sentiment"] = args.sentiment
 
     if args.mode == "bm25":
         results = fts_search(conn, args.query, limit=args.limit, filters=filters)
     else:
-        provider = get_provider(config.EMBEDDING_PROVIDER, conn=conn) if args.mode != "bm25" else None
+        provider = get_provider(config.EMBEDDING_PROVIDER, conn=conn)
         results = hybrid_search(conn, args.query, limit=args.limit, filters=filters, embedding_provider=provider)
 
     if args.json_output:
@@ -114,13 +126,13 @@ def cmd_search(args):
 
 def cmd_server(args):
     """Start the MCP server."""
+    _load_env()
     from .server import mcp, _KB_TOKEN
 
     if args.transport == "http":
         import uvicorn
         app = mcp.streamable_http_app()
 
-        # Bearer token auth (only for HTTP, when KB_MCP_TOKEN is set)
         if _KB_TOKEN and not args.no_auth:
             import secrets
             from starlette.middleware.base import BaseHTTPMiddleware
@@ -128,8 +140,6 @@ def cmd_server(args):
 
             class BearerAuthMiddleware(BaseHTTPMiddleware):
                 async def dispatch(self, request, call_next):
-                    # Pass through CORS preflight — browsers send OPTIONS
-                    # without Authorization headers
                     if request.method == "OPTIONS":
                         return await call_next(request)
                     auth = request.headers.get("Authorization", "")
@@ -144,9 +154,47 @@ def cmd_server(args):
         mcp.run(transport="stdio")
 
 
+def cmd_init(args):
+    """Initialize a new vault directory."""
+    dest = Path(args.path).resolve()
+
+    # Guard: refuse to overwrite existing vault
+    if (dest / "wiki").is_dir():
+        print(f"Error: {dest}/wiki/ already exists. This looks like an existing vault.")
+        sys.exit(1)
+    if (dest / "pkb.db").exists():
+        print(f"Error: {dest}/pkb.db already exists. This looks like an existing vault.")
+        sys.exit(1)
+
+    # Find templates directory (inside the installed package)
+    templates_dir = Path(__file__).parent / "templates"
+    if not templates_dir.is_dir():
+        print(f"Error: templates directory not found at {templates_dir}")
+        sys.exit(1)
+
+    # Copy templates to destination
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(templates_dir, dest, dirs_exist_ok=True)
+
+    print(f"Vault initialized at {dest}")
+    print()
+    print("Next steps:")
+    print(f"  1. cd {dest}")
+    print(f"  2. Copy .env.example to .env and set your VOYAGE_API_KEY")
+    print(f"  3. pkb rebuild")
+    print(f"  4. Connect your MCP client (see .claude/settings.json)")
+
+
 def main():
-    parser = argparse.ArgumentParser(prog="pkb", description="personal-knowledge-base CLI")
+    parser = argparse.ArgumentParser(prog="pkb", description="Personal knowledge base MCP server")
+    parser.add_argument("--vault", type=Path, metavar="PATH",
+                       help="Vault directory (default: PKB_VAULT_ROOT env or cwd)")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # init
+    p_init = subparsers.add_parser("init", help="Initialize a new vault")
+    p_init.add_argument("path", nargs="?", default=".", help="Directory to initialize (default: .)")
+    p_init.set_defaults(func=cmd_init)
 
     # rebuild
     p_rebuild = subparsers.add_parser("rebuild", help="Index wiki/ into SQLite")
@@ -164,7 +212,7 @@ def main():
     p_search.add_argument("query", help="Search query")
     p_search.add_argument("-n", "--limit", type=int, default=10, help="Max results")
     p_search.add_argument("--mode", choices=["hybrid", "bm25"], default="hybrid", help="Search mode")
-    p_search.add_argument("--type", help="Filter by node type")
+    p_search.add_argument("--origin", help="Filter by origin (webpage, paper, note, ...)")
     p_search.add_argument("--sentiment", help="Filter by sentiment")
     p_search.add_argument("--json", dest="json_output", action="store_true", help="JSON output")
     p_search.set_defaults(func=cmd_search)
@@ -180,6 +228,11 @@ def main():
     p_server.set_defaults(func=cmd_server)
 
     args = parser.parse_args()
+
+    # Apply --vault before running any command
+    if args.vault:
+        config.set_vault_root(args.vault)
+
     args.func(args)
 
 

@@ -4,6 +4,7 @@ Configuration lives in config.py (checked in). Secrets live in .env (gitignored)
 Per-run overrides come from pytest CLI flags: --live-vault, --judge-provider, --judge-model.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -12,10 +13,19 @@ from dotenv import load_dotenv
 
 from . import config
 
+# Point pkb config at sample vault for tests
+os.environ.setdefault("PKB_VAULT_ROOT", str(config.VAULT_PATH))
+
+# Reload config with the correct vault root
+from pkb import config as pkb_config
+pkb_config.set_vault_root(config.VAULT_PATH)
+
 # Load .env for API keys only (secrets, not config)
-_env_file = config.VAULT_PATH / ".env"
-if _env_file.exists():
-    load_dotenv(_env_file)
+# Check both sample vault and project root for .env
+for _env_candidate in [config.VAULT_PATH / ".env", Path(__file__).parent.parent / ".env"]:
+    if _env_candidate.exists():
+        load_dotenv(_env_candidate)
+        break
 
 
 # -- pytest CLI options ------------------------------------------------

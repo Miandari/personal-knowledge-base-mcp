@@ -1,7 +1,7 @@
 [project]
-name = "compiled-knowledge-base"
+name = "pkb-mcp"
 version = "0.1.0"
-description = "Personal LLM wiki with SQLite + DAG + demand-driven compilation"
+description = "Personal knowledge base MCP server — hybrid search, DAG compilation, Obsidian-compatible"
 requires-python = ">=3.11"
 dependencies = [
     "apsw>=3.46",
@@ -16,7 +16,11 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
+[project.scripts]
+pkb = "pkb.__main__:main"
+
 [project.optional-dependencies]
+bench = ["matplotlib", "anthropic>=0.52"]
 test = [
     "pytest>=8.0",
     "pytest-timeout>=2.3",
@@ -27,6 +31,9 @@ test = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["pkb"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"pkb/templates" = "pkb/templates"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,22 @@
+# Secrets
+.env
+
+# SQLite database (derived, rebuildable from markdown)
+pkb.db
+pkb.db-wal
+pkb.db-shm
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
+
+# Obsidian workspace state
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# Backups
+.backups/
