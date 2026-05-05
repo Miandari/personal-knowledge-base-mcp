@@ -466,7 +466,13 @@ def detect_new_sources(
     embedding_provider: EmbeddingProvider | None = None,
     distance_threshold: float = 0.35,
 ) -> list[NodeSummary]:
-    """Find pages semantically related to a concept but not in its sources."""
+    """Find pages related to a concept but not yet in its sources.
+
+    Two detection methods:
+    1. Semantic similarity — hybrid search on concept body, filtered by distance and recency.
+    2. Reverse related edges — pages that explicitly declared related: [[this concept]].
+       These bypass the timestamp/distance filters since the user declared the relationship.
+    """
     concept = conn.execute("SELECT * FROM nodes WHERE id = ?", (concept_id,)).fetchone()
     if not concept:
         return []
@@ -503,6 +509,24 @@ def detect_new_sources(
                 id=hit.node_id, title=hit.title, type=hit.type,
                 status=hit.status, updated=hit.updated, snippet=hit.snippet,
             ))
+
+    # Also surface pages that explicitly declared related: [[this concept]]
+    # These bypass timestamp/distance filters — the user's declaration is the signal.
+    seen_ids = {s.id for s in new_sources} | known_source_ids | {concept_id} | meta_pages
+    reverse_related = conn.execute(
+        "SELECT n.id, n.title, n.type, n.status, n.updated, n.body "
+        "FROM edges e JOIN nodes n ON e.from_id = n.id "
+        "WHERE e.to_id = ? AND e.edge_type = 'related'",
+        (concept_id,),
+    ).fetchall()
+    for row in reverse_related:
+        if row["id"] not in seen_ids:
+            new_sources.append(NodeSummary(
+                id=row["id"], title=row["title"], type=row["type"],
+                status=row["status"], updated=row["updated"],
+                snippet=row["body"][:200] if row["body"] else "",
+            ))
+            seen_ids.add(row["id"])
 
     return new_sources
 

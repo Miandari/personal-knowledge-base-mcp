@@ -1124,3 +1124,165 @@ class TestEdgeCases:
         results = kb_list(type="nonexistent_type_xyz")
         assert isinstance(results, list)
         assert len(results) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# J. Related parameter + auto-suggest + reverse edges + wikilink weaving
+# ═══════════════════════════════════════════════════════════════════
+
+class TestKbAddRelated:
+    """kb_add with the `related` parameter."""
+
+    def test_add_with_related_frontmatter(self, mcp_sandbox):
+        """related param generates wikilink entries in frontmatter."""
+        try:
+            r = kb_add(
+                title="Related Param Test",
+                type="source",
+                body="# Test\n\nBody about related params.",
+                related=["concepts/test-concept-alpha", "concepts/test-concept-beta"],
+            )
+            assert "error" not in r
+            content = (config.WIKI_DIR / "sources" / "related-param-test.md").read_text()
+            assert "related:" in content
+            assert "related: []" not in content
+            assert "[[concepts/test-concept-alpha]]" in content
+            assert "[[concepts/test-concept-beta]]" in content
+        finally:
+            _cleanup_added_page("related-param-test", "sources")
+
+    def test_add_with_related_creates_edges(self, mcp_sandbox):
+        """related param creates 'related' edges in the database."""
+        try:
+            kb_add(
+                title="Related Edges Test",
+                type="source",
+                body="# Test\n\nBody about related edges.",
+                related=["concepts/test-concept-alpha"],
+            )
+            conn = get_connection()
+            try:
+                edges = conn.execute(
+                    "SELECT to_id FROM edges WHERE from_id = ? AND edge_type = 'related'",
+                    ("sources/related-edges-test",),
+                ).fetchall()
+                to_ids = [e["to_id"] for e in edges]
+                assert "concepts/test-concept-alpha" in to_ids
+            finally:
+                conn.close()
+        finally:
+            _cleanup_added_page("related-edges-test", "sources")
+
+    def test_add_without_related_still_empty(self, mcp_sandbox):
+        """Without related param, frontmatter has related: []."""
+        try:
+            kb_add(title="No Related Test", type="source", body="Body.")
+            content = (config.WIKI_DIR / "sources" / "no-related-test.md").read_text()
+            assert "related: []" in content
+        finally:
+            _cleanup_added_page("no-related-test", "sources")
+
+    def test_add_returns_suggested_related(self, mcp_sandbox):
+        """kb_add response includes suggested_related list."""
+        try:
+            r = kb_add(
+                title="Suggest Test Page",
+                type="source",
+                body="# Memory\n\nAgent memory systems and retrieval patterns.",
+            )
+            assert "error" not in r
+            assert "suggested_related" in r
+            assert isinstance(r["suggested_related"], list)
+        finally:
+            _cleanup_added_page("suggest-test-page", "sources")
+
+    def test_add_suggested_excludes_declared(self, mcp_sandbox):
+        """Already-declared related pages are excluded from suggestions."""
+        try:
+            r = kb_add(
+                title="Declared Exclude Test",
+                type="source",
+                body="# Memory\n\nAgent memory systems for AI agents.",
+                related=["concepts/test-concept-alpha"],
+            )
+            assert "error" not in r
+            suggested_ids = [s["id"] for s in r.get("suggested_related", [])]
+            assert "concepts/test-concept-alpha" not in suggested_ids
+        finally:
+            _cleanup_added_page("declared-exclude-test", "sources")
+
+
+class TestDetectNewSourcesRelated:
+    """detect_new_sources surfaces reverse related edges."""
+
+    def test_reverse_related_surfaced(self, mcp_sandbox):
+        """concept-beta declares related: [[concept-alpha]].
+        detect_new_sources on concept-alpha should find concept-beta."""
+        from pkb.search import detect_new_sources
+
+        conn = get_connection()
+        try:
+            candidates = detect_new_sources(conn, "concepts/test-concept-alpha")
+            candidate_ids = [c.id for c in candidates]
+            assert "concepts/test-concept-beta" in candidate_ids
+        finally:
+            conn.close()
+
+    def test_reverse_related_no_duplicates(self, mcp_sandbox):
+        """No duplicate entries from semantic + reverse-related overlap."""
+        from pkb.search import detect_new_sources
+
+        conn = get_connection()
+        try:
+            candidates = detect_new_sources(conn, "concepts/test-concept-alpha")
+            candidate_ids = [c.id for c in candidates]
+            assert len(candidate_ids) == len(set(candidate_ids))
+        finally:
+            conn.close()
+
+    def test_reverse_related_already_source_excluded(self, mcp_sandbox):
+        """Pages already in the concept's sources list don't surface."""
+        from pkb.search import detect_new_sources
+
+        conn = get_connection()
+        try:
+            # paper-alpha IS a source of concept-alpha
+            candidates = detect_new_sources(conn, "concepts/test-concept-alpha")
+            candidate_ids = [c.id for c in candidates]
+            assert "sources/test-paper-alpha" not in candidate_ids
+        finally:
+            conn.close()
+
+
+class TestSynthesizeWikilinks:
+    """kb_synthesize includes wikilink candidates and instruction."""
+
+    def test_synthesize_includes_wikilink_instruction(self, mcp_sandbox):
+        """Synthesis prompt tells the LLM to use [[slug]] notation."""
+        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        assert "[[slug]] wikilink notation" in r.lower() or "wikilink notation" in r.lower()
+
+    def test_synthesize_includes_available_pages(self, mcp_sandbox):
+        """Synthesis prompt lists linkable pages."""
+        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        # Should include at least some of the test pages as candidates
+        assert "[[" in r
+        # The page list section should contain at least one test page
+        has_test_page = any(
+            slug in r
+            for slug in [
+                "concepts/test-concept-beta",
+                "sources/test-paper-alpha",
+                "entities/test-tool-entity",
+            ]
+        )
+        assert has_test_page, "No test pages found in synthesis wikilink candidates"
+
+    def test_synthesize_excludes_self(self, mcp_sandbox):
+        """The page being synthesized is not in its own link candidates."""
+        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        # Link candidates are formatted as "- [[slug]] (Title)"
+        # The node_id appears elsewhere (header, reindex rule) but not as a candidate
+        import re
+        candidates = re.findall(r"^- \[\[([^\]]+)\]\]", r, re.MULTILINE)
+        assert "concepts/test-concept-alpha" not in candidates

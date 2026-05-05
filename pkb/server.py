@@ -16,6 +16,7 @@ from .models import NodeSummary, SearchResult, NodeDetail, ExploreResult, Status
 from .search import (
     hybrid_search, fts_search, get_node, get_node_summary,
     list_nodes, get_status, explore, get_source_chain, get_derived_pages,
+    get_neighborhood,
 )
 
 mcp = FastMCP("pkb", instructions="""\
@@ -99,9 +100,17 @@ Personal KB tool. Add a new page to the user's personal wiki. Writes a
 markdown file with frontmatter and indexes it in SQLite immediately. The
 page is searchable right away.
 
+Use the `related` parameter to declare connections to existing pages (e.g.,
+related=["concepts/agent-memory"]). This creates graph edges that surface
+during kb_explore — the related concept will show the new page as an
+unincorporated source. Use `sources` for pages this was built FROM;
+use `related` for pages this is RELEVANT TO.
+
 Does NOT trigger compilation — the caller decides when to compile.
 Does NOT fetch URLs — pass the content directly in the body parameter.
-Returns the indexed node summary on success."""
+Returns the indexed node summary on success, plus `suggested_related` —
+a list of existing pages that are semantically similar. The user can
+confirm which suggestions to link."""
 
 _SYNTHESIZE_DESC = """\
 Personal KB tool. Assemble a synthesis/compilation prompt for rewriting a
@@ -224,12 +233,14 @@ def kb_add(
     source_url: str = "",
     tags: list[str] | None = None,
     sources: list[str] | None = None,
+    related: list[str] | None = None,
     sentiment: str = "",
     ingested_via: str = "manual",
 ) -> dict:
     """Add a new page to the vault."""
     tags = tags or []
     sources = sources or []
+    related = related or []
 
     # Derive file path
     slug = _slugify(title)
@@ -269,7 +280,12 @@ def kb_add(
         fm_lines.append("sources:")
         for s in sources:
             fm_lines.append(f'  - "[[{s}]]"')
-    fm_lines.append("related: []")
+    if related:
+        fm_lines.append("related:")
+        for r in related:
+            fm_lines.append(f'  - "[[{r}]]"')
+    else:
+        fm_lines.append("related: []")
     fm_lines.append("---")
 
     full_content = "\n".join(fm_lines) + "\n\n" + body
@@ -287,7 +303,24 @@ def kb_add(
 
         if node_id:
             summary = get_node_summary(conn, node_id)
-            return summary.model_dump() if summary else {"id": node_id, "file_path": str(file_path)}
+            result = summary.model_dump() if summary else {"id": node_id, "file_path": str(file_path)}
+
+            # Auto-suggest related pages (exclude self, meta, already-declared)
+            meta_pages = {"index", "log", "hot"}
+            declared_set = set(related) | set(sources)
+            try:
+                suggestions = hybrid_search(conn, body[:2000], limit=5, embedding_provider=provider)
+                result["suggested_related"] = [
+                    {"id": s.node_id, "title": s.title}
+                    for s in suggestions
+                    if s.node_id != node_id
+                    and s.node_id not in meta_pages
+                    and s.node_id not in declared_set
+                ][:3]
+            except Exception:
+                result["suggested_related"] = []
+
+            return result
         return {"error": "Indexing failed"}
     finally:
         conn.close()
@@ -299,6 +332,7 @@ def kb_synthesize(node_id: str, source_ids: list[str] | None = None) -> str:
     source_ids = source_ids or []
     conn = _get_conn()
     try:
+        provider = _get_provider(conn)
         existing = get_node(conn, node_id)
 
         source_pages = []
@@ -316,6 +350,27 @@ def kb_synthesize(node_id: str, source_ids: list[str] | None = None) -> str:
             sources_text += f"Type: {sp.type} | Updated: {sp.updated}\n"
             sources_text += sp.body[:3000]
 
+        # Scoped wikilink candidates: semantic search + graph neighbors
+        candidate_ids = set()
+        try:
+            search_hits = hybrid_search(conn, existing_title, limit=30, embedding_provider=provider)
+            candidate_ids |= {h.node_id for h in search_hits}
+        except Exception:
+            pass
+        neighbors = get_neighborhood(conn, node_id, radius=1)
+        candidate_ids |= {n.id for n in neighbors}
+        candidate_ids.discard(node_id)
+
+        if candidate_ids:
+            placeholders = ",".join("?" * len(candidate_ids))
+            available = conn.execute(
+                f"SELECT id, title FROM nodes WHERE id IN ({placeholders}) AND type != 'meta'",
+                list(candidate_ids),
+            ).fetchall()
+            page_list = "\n".join(f"- [[{r['id']}]] ({r['title']})" for r in available)
+        else:
+            page_list = "(no linkable pages found)"
+
         return f"""## Synthesis task
 
 Rewrite [[{node_id}]] to incorporate the following new sources.
@@ -332,6 +387,8 @@ Rewrite [[{node_id}]] to incorporate the following new sources.
 - Add each new source to the `sources: []` list in frontmatter.
 - If any new source contradicts existing content, add a > [!contradiction] callout.
 - Preserve the frontmatter schema (flat YAML, all required fields).
+- When referring to concepts, entities, or topics that exist in the wiki, use [[slug]] wikilink notation inline in the prose. Only link to pages in this list:
+{page_list}
 - After writing the updated file to disk, you MUST immediately call kb_reindex(node_id="{node_id}") to update the search index. Do not proceed with other operations until reindexing completes.
 """
     finally:
