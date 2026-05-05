@@ -1,27 +1,29 @@
 ---
-type: concept
-title: "MCP ecosystem"
+title: MCP ecosystem
+origin: note
+status: developing
 aliases:
   - "Model Context Protocol"
   - "MCP server development"
-created: 2026-04-11
-updated: 2026-04-11
+  - "concepts/mcp-ecosystem"
 tags:
   - mcp
   - mcp-server-development
   - agent-tooling
   - protocol
-status: developing
-complexity: intermediate
-domain: ai-development
 related:
   - "[[ai-coding-agents]]"
   - "[[claude-code]]"
   - "[[agent-memory]]"
-sources:
-  - "[[.raw/notion/2026-03-27.md]]"
-  - "[[.raw/notion/2026-03-28.md]]"
-  - "[[.raw/notion/2026-04-11.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-03-27.md"
+  - ".raw/notion/2026-03-28.md"
+  - ".raw/notion/2026-04-11.md"
+complexity: intermediate
+domain: ai-development
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # MCP ecosystem

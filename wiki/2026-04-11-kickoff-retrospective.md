@@ -1,15 +1,13 @@
 ---
-type: question
-title: "2026-04-11 kickoff retrospective"
-question: "Does the LLM-Wiki + qmd architecture actually pass the retrieval tests defined in the setup plan?"
-answer_quality: definitive
-created: 2026-04-11
-updated: 2026-04-11
+title: 2026-04-11 kickoff retrospective
+origin: note
+status: mature
+aliases:
+  - "questions/2026-04-11-kickoff-retrospective"
 tags:
   - meta
   - retrospective
   - retrieval-test
-status: mature
 related:
   - "[[uncomfortable-truths-ai-coding-agents]]"
   - "[[ai-coding-agents]]"
@@ -17,11 +15,14 @@ related:
   - "[[mcp-ecosystem]]"
   - "[[llm-context-scaling]]"
   - "[[llm-wiki-pattern]]"
-sources:
-  - "[[.raw/notion/2026-03-27.md]]"
-  - "[[.raw/notion/2026-03-28.md]]"
-  - "[[.raw/notion/2026-04-10.md]]"
-  - "[[.raw/notion/2026-04-11.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-03-27.md"
+  - ".raw/notion/2026-03-28.md"
+  - ".raw/notion/2026-04-10.md"
+  - ".raw/notion/2026-04-11.md"
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # Kickoff retrospective — 2026-04-11

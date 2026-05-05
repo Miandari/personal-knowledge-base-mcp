@@ -1,25 +1,27 @@
 ---
-type: entity
-title: "claude-obsidian"
+title: claude-obsidian
+origin: note
+status: mature
 aliases:
   - "AgriciDaniel/claude-obsidian"
-created: 2026-04-11
-updated: 2026-04-11
+  - "entities/claude-obsidian"
 tags:
   - llm-wiki-pattern
   - claude-code-skill
   - github-repository
   - agent-memory
-status: mature
-entity_type: repository
-role: "Claude + Obsidian wiki vault — the base this vault is built on"
-first_mentioned: "[[.raw/notion/2026-04-10.md]]"
+  - "entity/repository"
 related:
   - "[[llm-wiki-pattern]]"
   - "[[claude-code]]"
   - "[[agent-memory]]"
-sources:
-  - "[[.raw/notion/2026-04-10.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-04-10.md"
+role: Claude + Obsidian wiki vault — the base this vault is built on
+first_mentioned: "[[.raw/notion/2026-04-10.md]]"
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # claude-obsidian

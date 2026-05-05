@@ -1,30 +1,32 @@
 ---
-type: concept
-title: "LLM context scaling"
+title: LLM context scaling
+origin: note
+status: developing
 aliases:
   - "long context"
   - "100M token context"
   - "context window scaling"
   - "KV cache compression"
-created: 2026-04-11
-updated: 2026-04-11
+  - "concepts/llm-context-scaling"
 tags:
   - llm-context-scaling
   - long-context
   - kv-cache-compression
   - inference-optimization
   - research
-status: developing
-complexity: advanced
-domain: ai-development
 related:
   - "[[agent-memory]]"
   - "[[msa-memory-sparse-attention]]"
   - "[[turboquant]]"
-sources:
-  - "[[.raw/notion/2026-03-27.md]]"
-  - "[[.raw/notion/2026-03-28.md]]"
-  - "[[.raw/notion/2026-04-11.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-03-27.md"
+  - ".raw/notion/2026-03-28.md"
+  - ".raw/notion/2026-04-11.md"
+complexity: advanced
+domain: ai-development
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # LLM context scaling

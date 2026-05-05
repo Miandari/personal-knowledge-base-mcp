@@ -1,19 +1,22 @@
 ---
-type: entity
-title: "GraphRAG"
-created: 2026-04-13
-updated: 2026-04-13
+title: GraphRAG
+origin: conversation
 status: seed
+ingested_via: manual
+aliases:
+  - "entities/graphrag"
 tags:
   - graphrag
   - knowledge-graph
   - rag
   - prior-art
   - microsoft-research
-url: "https://arxiv.org/abs/2404.16130"
-sentiment: neutral
-ingested_via: conversation
 related: []
+sources: []
+sentiment: neutral
+url: "https://arxiv.org/abs/2404.16130"
+created_at: 2026-04-13
+updated_at: 2026-04-13
 ---
 
 # GraphRAG

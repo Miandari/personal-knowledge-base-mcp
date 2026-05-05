@@ -1,29 +1,31 @@
 ---
-type: concept
-title: "Agent memory"
+title: Agent memory
+origin: note
+status: developing
 aliases:
   - "LLM memory"
   - "persistent agent memory"
   - "external agent memory"
-created: 2026-04-11
-updated: 2026-04-11
+  - "concepts/agent-memory"
 tags:
   - agent-memory
   - llm-wiki-pattern
   - knowledge-management
   - infrastructure
-status: developing
-complexity: intermediate
-domain: ai-development
 related:
   - "[[llm-wiki-pattern]]"
   - "[[llm-context-scaling]]"
   - "[[ai-coding-agents]]"
   - "[[mempalace]]"
-sources:
-  - "[[.raw/notion/2026-03-27.md]]"
-  - "[[.raw/notion/2026-04-10.md]]"
-  - "[[.raw/notion/2026-04-11.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-03-27.md"
+  - ".raw/notion/2026-04-10.md"
+  - ".raw/notion/2026-04-11.md"
+complexity: intermediate
+domain: ai-development
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # Agent memory

@@ -1,9 +1,10 @@
 ---
-type: concept
-title: "SQLite hybrid search stack"
-created: 2026-04-13
-updated: 2026-04-13
+title: SQLite hybrid search stack
+origin: conversation
 status: seed
+ingested_via: manual
+aliases:
+  - "concepts/sqlite-hybrid-search-stack"
 tags:
   - sqlite
   - fts5
@@ -11,9 +12,11 @@ tags:
   - hybrid-search
   - rrf
   - pkb-design
-sentiment: enthusiastic
-ingested_via: conversation
 related: []
+sources: []
+sentiment: enthusiastic
+created_at: 2026-04-13
+updated_at: 2026-04-13
 ---
 
 # SQLite hybrid search stack

@@ -1,26 +1,28 @@
 ---
-type: entity
-title: "obra/superpowers"
+title: obra/superpowers
+origin: note
+status: developing
 aliases:
-  - "superpowers"
+  - superpowers
   - "Jesse Vincent's superpowers"
-created: 2026-04-11
-updated: 2026-04-11
+  - "entities/obra-superpowers"
 tags:
   - ai-coding-agents
   - claude-code
   - github-repository
   - skills-framework
-status: developing
-entity_type: repository
-role: "Composable SKILL.md-based agent skills framework and software development methodology"
-first_mentioned: "[[.raw/notion/2026-03-28.md]]"
+  - "entity/repository"
 related:
   - "[[claude-code]]"
   - "[[ai-coding-agents]]"
   - "[[llm-wiki-pattern]]"
-sources:
-  - "[[.raw/notion/2026-03-28.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-03-28.md"
+role: Composable SKILL.md-based agent skills framework and software development methodology
+first_mentioned: "[[.raw/notion/2026-03-28.md]]"
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # obra/superpowers

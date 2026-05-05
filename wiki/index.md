@@ -1,11 +1,11 @@
 ---
-type: meta
-title: "Wiki index"
-created: 2026-04-11
-updated: 2026-04-11
+title: Wiki index
+origin: meta
+status: developing
 tags:
   - meta
-status: developing
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # Wiki index

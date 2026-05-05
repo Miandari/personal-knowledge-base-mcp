@@ -1,9 +1,9 @@
 ---
-type: meta
-title: "Operation log"
-created: 2026-04-11
-updated: 2026-04-11
+title: Operation log
+origin: meta
 status: developing
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # Log

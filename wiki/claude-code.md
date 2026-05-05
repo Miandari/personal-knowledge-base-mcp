@@ -1,28 +1,31 @@
 ---
-type: entity
-title: "Claude Code"
-created: 2026-04-11
-updated: 2026-04-11
+title: Claude Code
+origin: note
+status: developing
+aliases:
+  - "entities/claude-code"
 tags:
   - ai-coding-agents
   - tool
   - anthropic
   - claude-code
-status: developing
-entity_type: product
-role: "Anthropic's terminal-native AI coding agent (CLI)"
-first_mentioned: "[[.raw/notion/2026-03-27.md]]"
+  - "entity/product"
 related:
   - "[[anthropic]]"
   - "[[ai-coding-agents]]"
   - "[[uncomfortable-truths-ai-coding-agents]]"
   - "[[obra-superpowers]]"
   - "[[claude-obsidian]]"
-sources:
-  - "[[.raw/notion/2026-03-27.md]]"
-  - "[[.raw/notion/2026-03-28.md]]"
-  - "[[.raw/notion/2026-04-10.md]]"
-  - "[[.raw/notion/2026-04-11.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-03-27.md"
+  - ".raw/notion/2026-03-28.md"
+  - ".raw/notion/2026-04-10.md"
+  - ".raw/notion/2026-04-11.md"
+role: "Anthropic's terminal-native AI coding agent (CLI)"
+first_mentioned: "[[.raw/notion/2026-03-27.md]]"
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # Claude Code

@@ -1,17 +1,20 @@
 ---
-type: concept
-title: "Demand-driven compilation"
-created: 2026-04-13
-updated: 2026-04-13
+title: Demand-driven compilation
+origin: conversation
 status: seed
+ingested_via: manual
+aliases:
+  - "concepts/demand-driven-compilation"
 tags:
   - architecture
   - compilation
   - scalability
   - pkb-design
-sentiment: enthusiastic
-ingested_via: conversation
 related: []
+sources: []
+sentiment: enthusiastic
+created_at: 2026-04-13
+updated_at: 2026-04-13
 ---
 
 # Demand-driven compilation

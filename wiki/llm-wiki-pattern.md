@@ -1,30 +1,32 @@
 ---
-type: concept
-title: "LLM Wiki pattern"
+title: LLM Wiki pattern
+origin: note
+status: developing
 aliases:
   - "Karpathy LLM wiki"
   - "compiled knowledge base"
   - "persistent agent memory wiki"
   - "compilation over retrieval"
-created: 2026-04-11
-updated: 2026-04-11
+  - "concepts/llm-wiki-pattern"
 tags:
   - llm-wiki-pattern
   - agent-memory
   - knowledge-management
   - compilation-over-retrieval
-status: developing
-complexity: intermediate
-domain: ai-development
 related:
   - "[[agent-memory]]"
   - "[[claude-obsidian]]"
   - "[[mempalace]]"
   - "[[ai-coding-agents]]"
-sources:
-  - "[[.raw/notion/2026-03-28.md]]"
-  - "[[.raw/notion/2026-04-10.md]]"
-  - "[[.raw/notion/2026-04-11.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-03-28.md"
+  - ".raw/notion/2026-04-10.md"
+  - ".raw/notion/2026-04-11.md"
+complexity: intermediate
+domain: ai-development
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # LLM Wiki pattern

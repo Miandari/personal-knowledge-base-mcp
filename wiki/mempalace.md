@@ -1,24 +1,26 @@
 ---
-type: entity
-title: "mempalace"
+title: mempalace
+origin: note
+status: developing
 aliases:
   - "milla-jovovich/mempalace"
-created: 2026-04-11
-updated: 2026-04-11
+  - "entities/mempalace"
 tags:
   - agent-memory
   - github-repository
   - chromadb
-status: developing
-entity_type: repository
-role: "ChromaDB-based memory system for agents, marketed as the highest-scoring AI memory system on current benchmarks"
-first_mentioned: "[[.raw/notion/2026-04-10.md]]"
+  - "entity/repository"
 related:
   - "[[agent-memory]]"
   - "[[llm-wiki-pattern]]"
-sources:
-  - "[[.raw/notion/2026-04-10.md]]"
-  - "[[.raw/notion/2026-04-11.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-04-10.md"
+  - ".raw/notion/2026-04-11.md"
+role: ChromaDB-based memory system for agents, marketed as the highest-scoring AI memory system on current benchmarks
+first_mentioned: "[[.raw/notion/2026-04-10.md]]"
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # mempalace

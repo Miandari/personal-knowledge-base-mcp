@@ -1,19 +1,22 @@
 ---
-type: entity
-title: "RAPTOR"
-created: 2026-04-13
-updated: 2026-04-13
+title: RAPTOR
+origin: conversation
 status: seed
+ingested_via: manual
+aliases:
+  - "entities/raptor"
 tags:
   - raptor
   - hierarchical-retrieval
   - rag
   - prior-art
   - stanford
-url: "https://arxiv.org/abs/2401.18059"
-sentiment: neutral
-ingested_via: conversation
 related: []
+sources: []
+sentiment: neutral
+url: "https://arxiv.org/abs/2401.18059"
+created_at: 2026-04-13
+updated_at: 2026-04-13
 ---
 
 # RAPTOR

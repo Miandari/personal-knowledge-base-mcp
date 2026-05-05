@@ -1,29 +1,30 @@
 ---
-type: source
-title: "Some uncomfortable truths about AI coding agents"
-created: 2026-04-11
-updated: 2026-04-11
+title: Some uncomfortable truths about AI coding agents
+origin: webpage
+status: developing
+ingested_via: notion_briefing
+briefing_date: 2026-03-28
+aliases:
+  - "sources/uncomfortable-truths-ai-coding-agents"
 tags:
   - ai-coding-agents
   - critique
   - production-readiness
   - llm-limitations
   - software-engineering
-status: developing
-source_type: blog_article
-author: "sarah_builds"
-date_published: 2026-03-26
-url: "https://standupforme.app/blog/some-uncomfortable-truths-about-ai-coding-agents/"
-confidence: high
-sentiment: critical
-ingested_via: notion_briefing
-briefing_date: 2026-03-28
+  - "source/blog_article"
 related:
   - "[[ai-coding-agents]]"
   - "[[claude-code]]"
   - "[[production-readiness-for-llm-code]]"
-sources:
-  - "[[.raw/notion/2026-03-28.md]]"
+sources: []
+raw_sources:
+  - ".raw/notion/2026-03-28.md"
+sentiment: critical
+confidence: high
+author: sarah_builds
+date_published: 2026-03-26
+url: "https://standupforme.app/blog/some-uncomfortable-truths-about-ai-coding-agents/"
 key_claims:
   - "LLM-based AI coding agents have no place in generating production code for any software built professionally."
   - "AI agents can write correct individual functions but cannot reason about institutional context — why specific mocks are in a test suite, why staging overrides a variable but local doesn't."
@@ -32,6 +33,8 @@ key_claims:
   - "AI coding agents can silently undo performance optimizations because the optimization looks redundant at a glance."
   - "There is an unresolved IP / copyright overhang when an entire codebase is AI-generated — the code 'technically belongs to everyone.'"
   - "Where AI coding agents actually work: non-coders prototyping ideas, experienced developers building recreational side projects — as long as the user does not intend to build a business off the results."
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # Some uncomfortable truths about AI coding agents

@@ -1,20 +1,17 @@
 ---
-type: concept
-title: "AI coding agents"
+title: AI coding agents
+origin: note
+status: developing
 aliases:
   - "agentic coding"
   - "AI coding assistants"
   - "coding agents"
-created: 2026-04-11
-updated: 2026-04-11
+  - "concepts/ai-coding-agents"
 tags:
   - ai-coding-agents
   - software-engineering
   - critique
   - production-readiness
-status: developing
-complexity: intermediate
-domain: ai-development
 related:
   - "[[claude-code]]"
   - "[[uncomfortable-truths-ai-coding-agents]]"
@@ -22,10 +19,15 @@ related:
   - "[[agent-memory]]"
 sources:
   - "[[uncomfortable-truths-ai-coding-agents]]"
-  - "[[.raw/notion/2026-03-27.md]]"
-  - "[[.raw/notion/2026-03-28.md]]"
-  - "[[.raw/notion/2026-04-10.md]]"
-  - "[[.raw/notion/2026-04-11.md]]"
+raw_sources:
+  - ".raw/notion/2026-03-27.md"
+  - ".raw/notion/2026-03-28.md"
+  - ".raw/notion/2026-04-10.md"
+  - ".raw/notion/2026-04-11.md"
+complexity: intermediate
+domain: ai-development
+created_at: 2026-04-11
+updated_at: 2026-04-11
 ---
 
 # AI coding agents
