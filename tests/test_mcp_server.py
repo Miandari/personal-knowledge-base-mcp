@@ -45,10 +45,10 @@ class TestKbSearch:
         assert isinstance(results, list)
         assert len(results) > 0
 
-    def test_type_filter(self):
-        results = kb_search(query="AI", limit=10, type="concept")
+    def test_origin_filter(self):
+        results = kb_search(query="AI", limit=10, origin="note")
         for r in results:
-            assert r["type"] == "concept"
+            assert r["origin"] == "note"
 
     def test_empty_query(self):
         results = kb_search(query="", limit=5)
@@ -82,21 +82,21 @@ class TestKbGet:
     """kb_get tool tests."""
 
     def test_get_existing_page(self):
-        result = kb_get(node_id="concepts/ai-coding-agents")
+        result = kb_get(node_id="ai-coding-agents")
         assert result is not None
         assert result["title"] == "AI coding agents"
-        assert result["type"] == "concept"
+        assert result["origin"] == "note"
         assert len(result["body"]) > 100
 
     def test_get_with_edges(self):
-        result = kb_get(node_id="concepts/ai-coding-agents")
+        result = kb_get(node_id="ai-coding-agents")
         assert "sources" in result
         assert "related" in result
         assert "sourced_by" in result
         assert isinstance(result["sources"], list)
 
     def test_get_nonexistent(self):
-        result = kb_get(node_id="nonexistent/page")
+        result = kb_get(node_id="nonexistent-page")
         assert result is None
 
 
@@ -108,9 +108,9 @@ class TestKbList:
         assert isinstance(results, list)
         assert len(results) > 0
 
-    def test_list_by_type(self):
-        results = kb_list(type="concept")
-        assert all(r["type"] == "concept" for r in results)
+    def test_list_by_origin(self):
+        results = kb_list(origin="note")
+        assert all(r["origin"] == "note" for r in results)
 
     def test_list_sorted(self):
         results = kb_list(sort="title")
@@ -122,8 +122,8 @@ class TestKbSynthesize:
 
     def test_synthesize_returns_prompt(self):
         result = kb_synthesize(
-            node_id="concepts/ai-coding-agents",
-            source_ids=["sources/uncomfortable-truths-ai-coding-agents"],
+            node_id="ai-coding-agents",
+            source_ids=["uncomfortable-truths-ai-coding-agents"],
         )
         assert isinstance(result, str)
         assert "Synthesis task" in result
@@ -132,8 +132,8 @@ class TestKbSynthesize:
 
     def test_synthesize_includes_sources(self):
         result = kb_synthesize(
-            node_id="concepts/ai-coding-agents",
-            source_ids=["sources/uncomfortable-truths-ai-coding-agents"],
+            node_id="ai-coding-agents",
+            source_ids=["uncomfortable-truths-ai-coding-agents"],
         )
         assert "uncomfortable-truths" in result.lower() or "uncomfortable truths" in result.lower()
 
@@ -159,7 +159,7 @@ class TestKbAdd:
         """Add a page, verify it exists, then clean up."""
         result = kb_add(
             title="Test MCP Add Page",
-            type="source",
+            origin="webpage",
             body="# Test\n\nThis is a test page created by test_mcp_server.py.",
             tags=["test", "automated"],
         )
@@ -168,7 +168,7 @@ class TestKbAdd:
         assert "error" not in result, f"kb_add returned error: {result}"
 
         # Verify file was created
-        expected_path = config.WIKI_DIR / "sources" / "test-mcp-add-page.md"
+        expected_path = config.WIKI_DIR / "test-mcp-add-page.md"
         try:
             assert expected_path.exists(), f"File not created at {expected_path}"
 
@@ -176,7 +176,7 @@ class TestKbAdd:
             from pkb.search import get_node_summary
             conn = get_connection()
             try:
-                summary = get_node_summary(conn, "sources/test-mcp-add-page")
+                summary = get_node_summary(conn, "test-mcp-add-page")
                 assert summary is not None
             finally:
                 conn.close()
@@ -187,8 +187,8 @@ class TestKbAdd:
             # Clean up DB entry
             conn = get_connection()
             try:
-                conn.execute("DELETE FROM nodes_fts WHERE node_id = 'sources/test-mcp-add-page'")
-                conn.execute("DELETE FROM nodes WHERE id = 'sources/test-mcp-add-page'")
+                conn.execute("DELETE FROM nodes_fts WHERE node_id = 'test-mcp-add-page'")
+                conn.execute("DELETE FROM nodes WHERE id = 'test-mcp-add-page'")
                 conn.commit()
             finally:
                 conn.close()
@@ -197,7 +197,7 @@ class TestKbAdd:
         """Adding a page that already exists should return an error."""
         result = kb_add(
             title="AI coding agents",
-            type="concept",
+            origin="note",
             body="Duplicate.",
         )
         assert "error" in result or "already exists" in str(result).lower()
@@ -207,9 +207,9 @@ class TestKbReindex:
     """kb_reindex tool tests."""
 
     def test_reindex_existing_page(self):
-        result = kb_reindex(node_id="concepts/ai-coding-agents")
+        result = kb_reindex(node_id="ai-coding-agents")
         assert "error" not in result, f"Reindex failed: {result}"
 
     def test_reindex_nonexistent(self):
-        result = kb_reindex(file_path="wiki/nonexistent/page.md")
+        result = kb_reindex(file_path="wiki/nonexistent-page.md")
         assert "error" in result

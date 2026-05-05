@@ -17,24 +17,24 @@ cases:
   # ── Uncomfortable truths test (the original retrieval challenge) ────
   - query: "critical takes on AI coding agents"
     must_appear_in_top:
-      - "sources/uncomfortable-truths-ai-coding-agents.md"
+      - "uncomfortable-truths-ai-coding-agents.md"
     k: 5
-    should_rank_first: "sources/uncomfortable-truths-ai-coding-agents.md"
+    should_rank_first: "uncomfortable-truths-ai-coding-agents.md"
     tags: [uncomfortable-truths, sentiment-retrieval]
     notes: "Primary retrieval test. The query uses 'critical' which should match sentiment:critical in frontmatter via BM25."
 
   - query: "where does Claude Code fall short in production"
     must_appear_in_top:
-      - "sources/uncomfortable-truths-ai-coding-agents.md"
+      - "uncomfortable-truths-ai-coding-agents.md"
     k: 5
-    should_rank_first: "sources/uncomfortable-truths-ai-coding-agents.md"
+    should_rank_first: "uncomfortable-truths-ai-coding-agents.md"
     tags: [uncomfortable-truths]
     notes: "Paraphrase test — no exact words from the article title appear in this query."
 
   - query: "honest problems with current AI coding tools"
     must_appear_in_top:
-      - "sources/uncomfortable-truths-ai-coding-agents.md"
-      - "concepts/ai-coding-agents.md"
+      - "uncomfortable-truths-ai-coding-agents.md"
+      - "ai-coding-agents.md"
     k: 5
     tags: [uncomfortable-truths]
     notes: "Both the source and the concept page should appear. The concept page may outrank the source (correct behavior — synthesis over source)."
@@ -42,22 +42,22 @@ cases:
   # ── Agent memory retrieval ─────────────────────────────────────────
   - query: "GitHub repos about agent memory"
     must_appear_in_top:
-      - "concepts/agent-memory.md"
+      - "agent-memory.md"
     k: 5
     tags: [agent-memory]
     notes: "Should surface the agent-memory concept. mempalace entity is a bonus."
 
   - query: "what is mempalace and how many stars does it have"
     must_appear_in_top:
-      - "entities/mempalace.md"
+      - "mempalace.md"
     k: 5
-    should_rank_first: "entities/mempalace.md"
+    should_rank_first: "mempalace.md"
     tags: [agent-memory, entity-retrieval]
 
   - query: "agent memory vs context window tradeoffs"
     must_appear_in_top:
-      - "concepts/agent-memory.md"
-      - "concepts/llm-context-scaling.md"
+      - "agent-memory.md"
+      - "llm-context-scaling.md"
     k: 5
     tags: [agent-memory, cross-concept]
     notes: "Tests cross-concept retrieval — both the memory page and the context-scaling page are relevant."
@@ -65,20 +65,20 @@ cases:
   # ── MCP ────────────────────────────────────────────────────────────
   - query: "latest on MCP server development"
     must_appear_in_top:
-      - "concepts/mcp-ecosystem.md"
+      - "mcp-ecosystem.md"
     k: 5
     tags: [mcp]
 
   - query: "which companies have official MCP servers"
     must_appear_in_top:
-      - "concepts/mcp-ecosystem.md"
+      - "mcp-ecosystem.md"
     k: 5
     tags: [mcp, entity-retrieval]
     notes: "The mcp-ecosystem page lists Google Analytics MCP, Google Colab MCP, WordPress Playground MCP."
 
   - query: "MCP security concerns and supply chain risks"
     must_appear_in_top:
-      - "concepts/mcp-ecosystem.md"
+      - "mcp-ecosystem.md"
     k: 5
     tags: [mcp, security]
     notes: "The MCP page has a dedicated Security Posture section covering TeamPCP, AgentGuard, AgentMint."
@@ -86,42 +86,42 @@ cases:
   # ── LLM context scaling ───────────────────────────────────────────
   - query: "LLM context window scaling"
     must_appear_in_top:
-      - "concepts/llm-context-scaling.md"
+      - "llm-context-scaling.md"
     k: 5
-    should_rank_first: "concepts/llm-context-scaling.md"
+    should_rank_first: "llm-context-scaling.md"
     tags: [context-scaling]
 
   - query: "100 million token context MSA paper"
     must_appear_in_top:
-      - "concepts/llm-context-scaling.md"
+      - "llm-context-scaling.md"
     k: 5
     tags: [context-scaling, paper]
     notes: "Specific paper recall — MSA is covered in depth in the context-scaling concept page."
 
   - query: "TurboQuant KV cache compression results"
     must_appear_in_top:
-      - "concepts/llm-context-scaling.md"
+      - "llm-context-scaling.md"
     k: 5
     tags: [context-scaling, paper]
 
   # ── LLM wiki pattern ──────────────────────────────────────────────
   - query: "what is the LLM wiki pattern and why does it work"
     must_appear_in_top:
-      - "concepts/llm-wiki-pattern.md"
+      - "llm-wiki-pattern.md"
     k: 5
-    should_rank_first: "concepts/llm-wiki-pattern.md"
+    should_rank_first: "llm-wiki-pattern.md"
     tags: [llm-wiki]
 
   - query: "compilation over retrieval"
     must_appear_in_top:
-      - "concepts/llm-wiki-pattern.md"
+      - "llm-wiki-pattern.md"
     k: 5
     tags: [llm-wiki]
     notes: "Core concept phrase — should match the concept page directly."
 
   - query: "who is building agent knowledge bases in 2026"
     must_appear_in_top:
-      - "concepts/llm-wiki-pattern.md"
+      - "llm-wiki-pattern.md"
     k: 5
     tags: [llm-wiki, agent-memory]
     notes: "The LLM wiki page has an 'Implementations observed in briefings' table listing 10+ repos."
@@ -129,29 +129,29 @@ cases:
   # ── Entity retrieval ───────────────────────────────────────────────
   - query: "Claude Code recent releases and changelog"
     must_appear_in_top:
-      - "entities/claude-code.md"
+      - "claude-code.md"
     k: 5
-    should_rank_first: "entities/claude-code.md"
+    should_rank_first: "claude-code.md"
     tags: [entity-retrieval]
 
   - query: "obra superpowers skills framework"
     must_appear_in_top:
-      - "entities/obra-superpowers.md"
+      - "obra-superpowers.md"
     k: 5
-    should_rank_first: "entities/obra-superpowers.md"
+    should_rank_first: "obra-superpowers.md"
     tags: [entity-retrieval]
 
   # ── Temporal retrieval ─────────────────────────────────────────────
   - query: "what was in the March 27 2026 AI briefing"
     must_appear_in_top:
-      - "concepts/llm-context-scaling.md"
+      - "llm-context-scaling.md"
     k: 5
     tags: [temporal]
     notes: "The March 27 briefing introduced the MSA 100M-token paper. The concept page cites .raw/notion/2026-03-27.md as a source and includes briefing_date references."
 
   - query: "what was trending on GitHub on March 28 2026"
     must_appear_in_top:
-      - "entities/obra-superpowers.md"
+      - "obra-superpowers.md"
     k: 5
     tags: [temporal]
     notes: "obra/superpowers was #1 trending on 2026-03-28 (2,293 stars/day). The entity page records this."
@@ -159,7 +159,7 @@ cases:
   # ── Sentiment-based retrieval ──────────────────────────────────────
   - query: "skeptical or critical perspectives on AI tools"
     must_appear_in_top:
-      - "sources/uncomfortable-truths-ai-coding-agents.md"
+      - "uncomfortable-truths-ai-coding-agents.md"
     k: 5
     tags: [sentiment-retrieval]
     notes: "Tests whether BM25 picks up 'critical' from frontmatter sentiment field + body text."

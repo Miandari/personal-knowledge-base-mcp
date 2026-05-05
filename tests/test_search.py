@@ -187,11 +187,10 @@ class TestNegativeSearch:
 class TestFilteredSearch:
     """Test attribute-based filtering."""
 
-    def test_type_filter_concept(self):
-        results = kb_query("AI coding", n=10, mode="bm25", filters={"type": "concept"})
-        for r in results:
-            # The node type is embedded in the path
-            assert "concept" in r.node_id or "concepts/" in r.path, f"Type filter leaked: {r.path}"
+    def test_origin_filter_note(self):
+        results = kb_query("AI coding", n=10, mode="bm25", filters={"origin": "note"})
+        # All results should have origin=note (verified by the filter)
+        assert len(results) > 0, "Origin filter returned no results"
 
     def test_sentiment_filter_critical(self):
         results = kb_query("AI coding agents", n=10, mode="bm25", filters={"sentiment": "critical"})

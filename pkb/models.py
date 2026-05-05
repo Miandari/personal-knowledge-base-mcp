@@ -7,9 +7,9 @@ class NodeSummary(BaseModel):
     """Lightweight node reference used in lists and edges."""
     id: str
     title: str
-    type: str
+    origin: str
     status: str
-    updated: str
+    updated_at: str
     file_path: str = ""
     snippet: str = ""
 
@@ -18,9 +18,9 @@ class SearchResult(BaseModel):
     """A single hybrid search result."""
     node_id: str
     title: str
-    type: str
+    origin: str
     status: str
-    updated: str
+    updated_at: str
     score: float              # raw RRF score (do NOT normalize)
     vec_distance: float | None = None  # raw cosine distance from best chunk
     snippet: str = ""
@@ -31,17 +31,15 @@ class NodeDetail(BaseModel):
     id: str
     file_path: str
     title: str
-    type: str
+    origin: str
     status: str
-    created: str
-    updated: str
+    created_at: str
+    updated_at: str
     body: str
     word_count: int = 0
     tags: list[str] = []
     aliases: list[str] = []
     sentiment: str | None = None
-    source_type: str | None = None
-    entity_type: str | None = None
     url: str | None = None
     author: str | None = None
     # Edges
@@ -86,4 +84,4 @@ class StatusResult(BaseModel):
     embedding_coverage: float = 0.0
     stale_count: int = 0
     orphan_chunks: int = 0
-    types: dict[str, int] = {}
+    origins: dict[str, int] = {}

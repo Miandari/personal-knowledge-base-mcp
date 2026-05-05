@@ -53,12 +53,12 @@ def file_md5(file_path: Path) -> str:
 
 
 def slug_from_path(file_path: Path, wiki_dir: Path) -> str:
-    """Derive a node ID slug from a wiki-relative path.
+    """Derive a node ID slug from a wiki file path.
 
-    wiki/concepts/ai-coding-agents.md → concepts/ai-coding-agents
+    wiki/agent-memory.md → agent-memory
+    wiki/concepts/ai-coding-agents.md → ai-coding-agents  (legacy subdirs)
     """
-    rel = file_path.relative_to(wiki_dir)
-    return str(rel.with_suffix(""))
+    return file_path.stem
 
 
 # ── Wikilink extraction ───────────────────────────────────────────────
@@ -77,7 +77,7 @@ def extract_wikilinks(body: str) -> list[str]:
 def resolve_wikilink(target: str, resolution_table: dict[str, list[str]]) -> str | None:
     """Resolve a wikilink target to a node ID using the resolution table.
 
-    Tries: exact match, suffix match (slug without path), case-insensitive.
+    Tries: exact match, alias match, case-insensitive.
     Returns None if unresolved.
     """
     # Normalize: strip .md, strip wiki/ prefix, strip leading/trailing whitespace
@@ -91,7 +91,7 @@ def resolve_wikilink(target: str, resolution_table: dict[str, list[str]]) -> str
     if target.startswith(".raw/") or target.startswith("raw/"):
         return None
 
-    # Exact match
+    # Exact match (flat slug or alias)
     if target in resolution_table:
         ids = resolution_table[target]
         return ids[0] if len(ids) == 1 else None  # ambiguous → None
@@ -102,11 +102,15 @@ def resolve_wikilink(target: str, resolution_table: dict[str, list[str]]) -> str
         if key.lower() == target_lower:
             return ids[0] if len(ids) == 1 else None
 
-    # Suffix match: "ai-coding-agents" → "concepts/ai-coding-agents"
-    for key, ids in resolution_table.items():
-        slug_part = key.rsplit("/", 1)[-1]
-        if slug_part.lower() == target_lower:
+    # Legacy: strip path prefix for old-style [[concepts/agent-memory]] links
+    if "/" in target:
+        basename = target.rsplit("/", 1)[-1]
+        if basename in resolution_table:
+            ids = resolution_table[basename]
             return ids[0] if len(ids) == 1 else None
+        for key, ids in resolution_table.items():
+            if key.lower() == basename.lower():
+                return ids[0] if len(ids) == 1 else None
 
     return None
 
@@ -356,30 +360,30 @@ class Indexer:
 
     def _upsert_node(self, node_id: str, rel_path: str, fm: dict, body: str, new_hash: str | None) -> None:
         """Insert or update a node + its FTS5/tags/aliases entries atomically."""
+        from .markdown import normalize_alias
+
         title = str(fm.get("title", ""))
-        node_type = str(fm.get("type", "meta"))
+        origin = str(fm.get("origin") or fm.get("type", "meta"))
         status = str(fm.get("status", "seed"))
-        created = str(fm.get("created", ""))
-        updated = str(fm.get("updated", created))
+        created_at = str(fm.get("created_at") or fm.get("created", ""))
+        updated_at = str(fm.get("updated_at") or fm.get("updated", created_at))
         tags = fm.get("tags") or []
         aliases = fm.get("aliases") or []
 
         self.conn.execute("""
-            INSERT INTO nodes (id, file_path, title, type, status, created, updated,
-                               sentiment, source_type, entity_type, complexity, confidence,
+            INSERT INTO nodes (id, file_path, title, origin, status, created_at, updated_at,
+                               sentiment, complexity, confidence,
                                ingested_via, briefing_date, url, author,
                                body, word_count, file_hash, indexed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 file_path = excluded.file_path,
                 title = excluded.title,
-                type = excluded.type,
+                origin = excluded.origin,
                 status = excluded.status,
-                created = excluded.created,
-                updated = excluded.updated,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at,
                 sentiment = excluded.sentiment,
-                source_type = excluded.source_type,
-                entity_type = excluded.entity_type,
                 complexity = excluded.complexity,
                 confidence = excluded.confidence,
                 ingested_via = excluded.ingested_via,
@@ -391,8 +395,8 @@ class Indexer:
                 file_hash = excluded.file_hash,
                 indexed_at = excluded.indexed_at
         """, (
-            node_id, rel_path, title, node_type, status, created, updated,
-            fm.get("sentiment"), fm.get("source_type"), fm.get("entity_type"),
+            node_id, rel_path, title, origin, status, created_at, updated_at,
+            fm.get("sentiment"),
             fm.get("complexity"), fm.get("confidence"),
             fm.get("ingested_via"), str(fm.get("briefing_date", "")) or None,
             fm.get("url") or fm.get("source_url"), fm.get("author"),
@@ -409,12 +413,35 @@ class Indexer:
                 (node_id, str(tag)),
             )
 
-        # Aliases
+        # Aliases — new schema with alias_norm PK
         self.conn.execute("DELETE FROM aliases WHERE node_id = ?", (node_id,))
+        now = datetime.now(timezone.utc).isoformat()
         for alias in aliases:
+            alias_str = str(alias)
+            anorm = normalize_alias(alias_str)
+            # Check for conflicts with other nodes
+            existing = self.conn.execute(
+                "SELECT node_id FROM aliases WHERE alias_norm = ?", (anorm,)
+            ).fetchone()
+            if existing and existing["node_id"] != node_id:
+                # Conflict — skip this alias, log warning
+                self.stats.get("errors", []).append(
+                    f"Alias conflict: '{alias_str}' (norm: '{anorm}') claimed by {existing['node_id']}, skipping for {node_id}"
+                ) if hasattr(self, 'stats') else None
+                continue
             self.conn.execute(
-                "INSERT OR IGNORE INTO aliases (node_id, alias) VALUES (?, ?)",
-                (node_id, str(alias)),
+                "INSERT OR REPLACE INTO aliases (alias_norm, alias, node_id, alias_kind, created_at) VALUES (?, ?, ?, ?, ?)",
+                (anorm, alias_str, node_id, "old_path" if "/" in alias_str else "title", now),
+            )
+        # Also add title as alias
+        title_norm = normalize_alias(title)
+        existing = self.conn.execute(
+            "SELECT node_id FROM aliases WHERE alias_norm = ?", (title_norm,)
+        ).fetchone()
+        if not existing or existing["node_id"] == node_id:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO aliases (alias_norm, alias, node_id, alias_kind, created_at) VALUES (?, ?, ?, ?, ?)",
+                (title_norm, title, node_id, "title", now),
             )
 
         # FTS5 — explicit management (no triggers)
@@ -431,19 +458,19 @@ class Indexer:
         """Build in-memory dict for O(1) wikilink resolution."""
         self._resolution_table = {}
 
-        # Node IDs
+        # Node IDs (flat slugs)
         for row in self.conn.execute("SELECT id FROM nodes"):
             nid = row["id"]
             self._resolution_table.setdefault(nid, []).append(nid)
-            # Also add the slug part (e.g., "ai-coding-agents" for "concepts/ai-coding-agents")
-            slug_part = nid.rsplit("/", 1)[-1]
-            if slug_part != nid:
-                self._resolution_table.setdefault(slug_part, []).append(nid)
 
-        # Aliases
-        for row in self.conn.execute("SELECT alias, node_id FROM aliases"):
-            alias = row["alias"].lower()
-            self._resolution_table.setdefault(alias, []).append(row["node_id"])
+        # Aliases (normalized key → node_id)
+        for row in self.conn.execute("SELECT alias_norm, alias, node_id FROM aliases"):
+            anorm = row["alias_norm"]
+            alias_lower = row["alias"].lower()
+            self._resolution_table.setdefault(anorm, []).append(row["node_id"])
+            # Also add the raw alias (lowercased) for case-insensitive matching
+            if alias_lower != anorm:
+                self._resolution_table.setdefault(alias_lower, []).append(row["node_id"])
 
     # ── Pass 2 ─────────────────────────────────────────────────────
 
@@ -454,7 +481,7 @@ class Indexer:
 
         for node_id in changed_ids:
             row = self.conn.execute(
-                "SELECT body, title, type FROM nodes WHERE id = ?", (node_id,)
+                "SELECT body, title, origin FROM nodes WHERE id = ?", (node_id,)
             ).fetchone()
             if not row:
                 continue
@@ -481,17 +508,24 @@ class Indexer:
         self.conn.commit()
 
     def _extract_edges(self, node_id: str, fm: dict, body: str) -> None:
-        """Extract and store edges from frontmatter and body wikilinks."""
+        """Extract and store edges from frontmatter and body wikilinks.
+
+        Edge types are singular: 'source', 'related', 'link'.
+        raw_sources are provenance pointers — NOT extracted as graph edges.
+        """
         # Clear existing edges for this node
         self.conn.execute("DELETE FROM edges WHERE from_id = ?", (node_id,))
 
-        # Sources edges
+        # Source edges (from frontmatter sources: [...])
         for source_ref in (fm.get("sources") or []):
             target = self._strip_wikilink(str(source_ref))
+            # Skip .raw/ references — these are provenance, not graph edges
+            if target.startswith(".raw/") or target.startswith("raw/"):
+                continue
             resolved = resolve_wikilink(target, self._resolution_table)
             to_id = resolved or target
             self.conn.execute(
-                "INSERT OR IGNORE INTO edges (from_id, to_id, edge_type) VALUES (?, ?, 'sources')",
+                "INSERT OR IGNORE INTO edges (from_id, to_id, edge_type) VALUES (?, ?, 'source')",
                 (node_id, to_id),
             )
 
@@ -505,13 +539,13 @@ class Indexer:
                 (node_id, to_id),
             )
 
-        # Wikilink edges from body
+        # Link edges from body wikilinks
         wikilinks = extract_wikilinks(body)
         for target in wikilinks:
             resolved = resolve_wikilink(target, self._resolution_table)
             if resolved and resolved != node_id:
                 self.conn.execute(
-                    "INSERT OR IGNORE INTO edges (from_id, to_id, edge_type) VALUES (?, ?, 'wikilink')",
+                    "INSERT OR IGNORE INTO edges (from_id, to_id, edge_type) VALUES (?, ?, 'link')",
                     (node_id, resolved),
                 )
 

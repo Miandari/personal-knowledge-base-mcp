@@ -11,13 +11,13 @@ import pytest
 import yaml
 
 
-VALID_TYPES = {"source", "entity", "concept", "domain", "comparison", "question", "overview", "meta"}
+VALID_ORIGINS = {"webpage", "paper", "conversation", "note", "book", "transcript", "meta"}
 VALID_STATUSES = {"seed", "developing", "mature", "evergreen"}
 VALID_SENTIMENTS = {"critical", "skeptical", "neutral", "mixed", "enthusiastic"}
-VALID_SOURCE_TYPES = {"article", "video", "podcast", "paper", "book", "transcript", "data", "notion_briefing", "blog_article", "image"}
-VALID_ENTITY_TYPES = {"person", "organization", "product", "repository", "place"}
 VALID_INGESTED_VIA = {"notion_briefing", "manual", "web_fetch", "youtube_mcp"}
 VALID_CONFIDENCE = {"high", "medium", "low"}
+# Origins that represent external sources (should have sentiment)
+SOURCE_ORIGINS = {"webpage", "paper", "book", "transcript"}
 
 # Date format: YYYY-MM-DD
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -63,20 +63,20 @@ class TestUniversalFields:
             if fm is None:
                 continue  # caught by presence test
             rel = str(page.relative_to(vault_path))
-            for field in ("type", "title", "created", "updated", "status"):
+            for field in ("origin", "title", "created_at", "updated_at", "status"):
                 if field not in fm:
                     failures.append(f"{rel}: missing required field '{field}'")
         assert not failures, f"Frontmatter violations:\n" + "\n".join(failures)
 
-    def test_type_values(self, vault_path):
+    def test_origin_values(self, vault_path):
         failures = []
         for page in _all_wiki_pages(vault_path):
             fm = _extract_frontmatter(page)
-            if fm is None or "type" not in fm:
+            if fm is None or "origin" not in fm:
                 continue
-            if fm["type"] not in VALID_TYPES:
+            if fm["origin"] not in VALID_ORIGINS:
                 rel = str(page.relative_to(vault_path))
-                failures.append(f"{rel}: type='{fm['type']}' not in {VALID_TYPES}")
+                failures.append(f"{rel}: origin='{fm['origin']}' not in {VALID_ORIGINS}")
         assert not failures, "\n".join(failures)
 
     def test_status_values(self, vault_path):
@@ -97,7 +97,7 @@ class TestUniversalFields:
             if fm is None:
                 continue
             rel = str(page.relative_to(vault_path))
-            for field in ("created", "updated", "briefing_date"):
+            for field in ("created_at", "updated_at", "briefing_date"):
                 if field in fm and fm[field] is not None:
                     val = str(fm[field])
                     if not DATE_RE.match(val):
@@ -181,7 +181,7 @@ class TestSentimentCoverage:
     """
 
     def test_source_pages_have_sentiment(self, vault_path):
-        """Source-type pages should (almost) always have a sentiment field.
+        """Source-origin pages should (almost) always have a sentiment field.
 
         Every article, blog post, paper, etc. has a tone — critical,
         enthusiastic, neutral. If a source page lacks sentiment, the
@@ -189,10 +189,10 @@ class TestSentimentCoverage:
         """
         source_pages = [
             p for p in _all_wiki_pages(vault_path)
-            if _extract_frontmatter(p) and _extract_frontmatter(p).get("type") == "source"
+            if _extract_frontmatter(p) and _extract_frontmatter(p).get("origin") in SOURCE_ORIGINS
         ]
         if not source_pages:
-            pytest.skip("No source-type pages in the vault")
+            pytest.skip("No source-origin pages in the vault")
 
         missing = []
         for p in source_pages:

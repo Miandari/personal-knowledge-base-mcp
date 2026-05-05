@@ -33,16 +33,16 @@ def hybrid_search(
     candidate_limit = max(limit * 5, 50)  # generous candidate pool
 
     # Build filter clauses
-    type_filter = filters.get("type")
+    origin_filter = filters.get("origin")
     sentiment_filter = filters.get("sentiment")
 
     # ── FTS5 results ──
-    fts_results = _fts_search(conn, query, type_filter, sentiment_filter, candidate_limit)
+    fts_results = _fts_search(conn, query, origin_filter, sentiment_filter, candidate_limit)
 
     # ── Vector results ──
     vec_results = []
     if embedding_provider and vec_weight > 0:
-        vec_results = _vec_search(conn, query, embedding_provider, type_filter, sentiment_filter, candidate_limit)
+        vec_results = _vec_search(conn, query, embedding_provider, origin_filter, sentiment_filter, candidate_limit)
 
     # ── RRF fusion ──
     scores: dict[str, float] = {}
@@ -70,16 +70,16 @@ def hybrid_search(
     results = []
     for node_id, score in ranked:
         row = conn.execute(
-            "SELECT id, title, type, status, updated, body FROM nodes WHERE id = ?",
+            "SELECT id, title, origin, status, updated_at, body FROM nodes WHERE id = ?",
             (node_id,),
         ).fetchone()
         if row:
             results.append(SearchResult(
                 node_id=row["id"],
                 title=row["title"],
-                type=row["type"],
+                origin=row["origin"],
                 status=row["status"],
-                updated=row["updated"],
+                updated_at=row["updated_at"],
                 score=score,
                 vec_distance=vec_distances.get(node_id),
                 snippet=row["body"][:300] if row["body"] else "",
@@ -96,11 +96,11 @@ def fts_search(
 ) -> list[SearchResult]:
     """FTS5-only search (BM25). Useful for keyword matching and negative tests."""
     filters = filters or {}
-    type_filter = filters.get("type")
+    origin_filter = filters.get("origin")
     sentiment_filter = filters.get("sentiment")
 
     # Request more candidates to allow for meta demotion
-    fts_ids = _fts_search(conn, query, type_filter, sentiment_filter, limit + len(config.META_NODE_IDS))
+    fts_ids = _fts_search(conn, query, origin_filter, sentiment_filter, limit + len(config.META_NODE_IDS))
 
     # Demote structural pages by moving them to the end
     content_ids = [nid for nid in fts_ids if nid not in config.META_NODE_IDS]
@@ -110,16 +110,16 @@ def fts_search(
     results = []
     for rank, node_id in enumerate(fts_ids, 1):
         row = conn.execute(
-            "SELECT id, title, type, status, updated, body FROM nodes WHERE id = ?",
+            "SELECT id, title, origin, status, updated_at, body FROM nodes WHERE id = ?",
             (node_id,),
         ).fetchone()
         if row:
             results.append(SearchResult(
                 node_id=row["id"],
                 title=row["title"],
-                type=row["type"],
+                origin=row["origin"],
                 status=row["status"],
-                updated=row["updated"],
+                updated_at=row["updated_at"],
                 score=1.0 / (60.0 + rank),
                 vec_distance=None,
                 snippet=row["body"][:300] if row["body"] else "",
@@ -131,7 +131,7 @@ def fts_search(
 def _fts_search(
     conn,
     query: str,
-    type_filter: str | None,
+    origin_filter: str | None,
     sentiment_filter: str | None,
     limit: int,
 ) -> list[str]:
@@ -149,9 +149,9 @@ def _fts_search(
     """
     params: list = [fts_query]
 
-    if type_filter:
-        sql += " AND n.type = ?"
-        params.append(type_filter)
+    if origin_filter:
+        sql += " AND n.origin = ?"
+        params.append(origin_filter)
     if sentiment_filter:
         sql += " AND n.sentiment = ?"
         params.append(sentiment_filter)
@@ -200,7 +200,7 @@ def _vec_search(
     conn,
     query: str,
     provider: EmbeddingProvider,
-    type_filter: str | None,
+    origin_filter: str | None,
     sentiment_filter: str | None,
     limit: int,
 ) -> list[tuple[str, float]]:
@@ -247,13 +247,13 @@ def _vec_search(
         node_id = chunk_row["node_id"]
 
         # Apply filters
-        if type_filter or sentiment_filter:
+        if origin_filter or sentiment_filter:
             node_row = conn.execute(
-                "SELECT type, sentiment FROM nodes WHERE id = ?", (node_id,)
+                "SELECT origin, sentiment FROM nodes WHERE id = ?", (node_id,)
             ).fetchone()
             if not node_row:
                 continue
-            if type_filter and node_row["type"] != type_filter:
+            if origin_filter and node_row["origin"] != origin_filter:
                 continue
             if sentiment_filter and node_row["sentiment"] != sentiment_filter:
                 continue
@@ -278,31 +278,29 @@ def get_node(conn, node_id: str) -> NodeDetail | None:
     aliases = [r["alias"] for r in conn.execute("SELECT alias FROM aliases WHERE node_id = ?", (node_id,))]
 
     # Source edges (this page's declared sources)
-    sources = _get_edge_targets(conn, node_id, "sources")
+    sources = _get_edge_targets(conn, node_id, "source")
     # Sourced-by edges (pages that cite this one as a source)
-    sourced_by = _get_edge_sources(conn, node_id, "sources")
+    sourced_by = _get_edge_sources(conn, node_id, "source")
     # Related edges
     related = _get_edge_targets(conn, node_id, "related")
     # Wikilinks out
     wikilinks = [r["to_id"] for r in conn.execute(
-        "SELECT to_id FROM edges WHERE from_id = ? AND edge_type = 'wikilink'", (node_id,)
+        "SELECT to_id FROM edges WHERE from_id = ? AND edge_type = 'link'", (node_id,)
     )]
 
     return NodeDetail(
         id=row["id"],
         file_path=row["file_path"],
         title=row["title"],
-        type=row["type"],
+        origin=row["origin"],
         status=row["status"],
-        created=row["created"],
-        updated=row["updated"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
         body=row["body"],
         word_count=row["word_count"] or 0,
         tags=tags,
         aliases=aliases,
         sentiment=row["sentiment"],
-        source_type=row["source_type"],
-        entity_type=row["entity_type"],
         url=row["url"],
         author=row["author"],
         sources=sources,
@@ -315,7 +313,7 @@ def get_node(conn, node_id: str) -> NodeDetail | None:
 def get_node_summary(conn, node_id: str) -> NodeSummary | None:
     """Get a lightweight node summary."""
     row = conn.execute(
-        "SELECT id, title, type, status, updated, file_path, body FROM nodes WHERE id = ?",
+        "SELECT id, title, origin, status, updated_at, file_path, body FROM nodes WHERE id = ?",  # noqa: E501
         (node_id,),
     ).fetchone()
     if not row:
@@ -323,9 +321,9 @@ def get_node_summary(conn, node_id: str) -> NodeSummary | None:
     return NodeSummary(
         id=row["id"],
         title=row["title"],
-        type=row["type"],
+        origin=row["origin"],
         status=row["status"],
-        updated=row["updated"],
+        updated_at=row["updated_at"],
         file_path=row["file_path"],
         snippet=row["body"][:300] if row["body"] else "",
     )
@@ -334,14 +332,14 @@ def get_node_summary(conn, node_id: str) -> NodeSummary | None:
 def _get_edge_targets(conn, from_id: str, edge_type: str) -> list[NodeSummary]:
     """Get nodes that from_id links TO via edge_type."""
     rows = conn.execute("""
-        SELECT n.id, n.title, n.type, n.status, n.updated, n.file_path, n.body
+        SELECT n.id, n.title, n.origin, n.status, n.updated_at, n.file_path, n.body
         FROM edges e
         JOIN nodes n ON n.id = e.to_id
         WHERE e.from_id = ? AND e.edge_type = ?
     """, (from_id, edge_type)).fetchall()
     return [NodeSummary(
-        id=r["id"], title=r["title"], type=r["type"], status=r["status"],
-        updated=r["updated"], file_path=r["file_path"],
+        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
+        updated_at=r["updated_at"], file_path=r["file_path"],
         snippet=r["body"][:200] if r["body"] else "",
     ) for r in rows]
 
@@ -349,14 +347,14 @@ def _get_edge_targets(conn, from_id: str, edge_type: str) -> list[NodeSummary]:
 def _get_edge_sources(conn, to_id: str, edge_type: str) -> list[NodeSummary]:
     """Get nodes that link TO to_id via edge_type (reverse direction)."""
     rows = conn.execute("""
-        SELECT n.id, n.title, n.type, n.status, n.updated, n.file_path, n.body
+        SELECT n.id, n.title, n.origin, n.status, n.updated_at, n.file_path, n.body
         FROM edges e
         JOIN nodes n ON n.id = e.from_id
         WHERE e.to_id = ? AND e.edge_type = ?
     """, (to_id, edge_type)).fetchall()
     return [NodeSummary(
-        id=r["id"], title=r["title"], type=r["type"], status=r["status"],
-        updated=r["updated"], file_path=r["file_path"],
+        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
+        updated_at=r["updated_at"], file_path=r["file_path"],
         snippet=r["body"][:200] if r["body"] else "",
     ) for r in rows]
 
@@ -364,61 +362,61 @@ def _get_edge_sources(conn, to_id: str, edge_type: str) -> list[NodeSummary]:
 # ── Graph traversal ───────────────────────────────────────────────────
 
 def get_source_chain(conn, node_id: str, max_depth: int = 10) -> list[dict]:
-    """Walk up 'sources' edges: what was this page built from?"""
+    """Walk up 'source' edges: what was this page built from?"""
     rows = conn.execute("""
         WITH RECURSIVE chain AS (
-            SELECT id, title, type, 0 AS depth, ',' || id || ',' AS path
+            SELECT id, title, origin, 0 AS depth, ',' || id || ',' AS path
             FROM nodes WHERE id = :start_id
 
             UNION ALL
 
-            SELECT n.id, n.title, n.type, c.depth + 1, c.path || n.id || ','
+            SELECT n.id, n.title, n.origin, c.depth + 1, c.path || n.id || ','
             FROM nodes n
             JOIN edges e ON e.to_id = n.id
             JOIN chain c ON e.from_id = c.id
-            WHERE e.edge_type = 'sources'
+            WHERE e.edge_type = 'source'
               AND c.depth < :max_depth
               AND instr(c.path, ',' || n.id || ',') = 0
         )
-        SELECT DISTINCT id, title, type, depth FROM chain ORDER BY depth
+        SELECT DISTINCT id, title, origin, depth FROM chain ORDER BY depth
     """, {"start_id": node_id, "max_depth": max_depth}).fetchall()
 
-    return [{"id": r["id"], "title": r["title"], "type": r["type"], "depth": r["depth"]} for r in rows]
+    return [{"id": r["id"], "title": r["title"], "origin": r["origin"], "depth": r["depth"]} for r in rows]
 
 
 def get_derived_pages(conn, node_id: str, max_depth: int = 10) -> list[dict]:
     """Walk down: what pages cite this one as a source?"""
     rows = conn.execute("""
         WITH RECURSIVE chain AS (
-            SELECT id, title, type, 0 AS depth, ',' || id || ',' AS path
+            SELECT id, title, origin, 0 AS depth, ',' || id || ',' AS path
             FROM nodes WHERE id = :start_id
 
             UNION ALL
 
-            SELECT n.id, n.title, n.type, c.depth + 1, c.path || n.id || ','
+            SELECT n.id, n.title, n.origin, c.depth + 1, c.path || n.id || ','
             FROM nodes n
             JOIN edges e ON e.from_id = n.id
             JOIN chain c ON e.to_id = c.id
-            WHERE e.edge_type = 'sources'
+            WHERE e.edge_type = 'source'
               AND c.depth < :max_depth
               AND instr(c.path, ',' || n.id || ',') = 0
         )
-        SELECT DISTINCT id, title, type, depth FROM chain WHERE id != :start_id ORDER BY depth
+        SELECT DISTINCT id, title, origin, depth FROM chain WHERE id != :start_id ORDER BY depth
     """, {"start_id": node_id, "max_depth": max_depth}).fetchall()
 
-    return [{"id": r["id"], "title": r["title"], "type": r["type"], "depth": r["depth"]} for r in rows]
+    return [{"id": r["id"], "title": r["title"], "origin": r["origin"], "depth": r["depth"]} for r in rows]
 
 
 def get_neighborhood(conn, node_id: str, radius: int = 2) -> list[NodeSummary]:
     """Get nodes within N hops (all edge types)."""
     rows = conn.execute("""
         WITH RECURSIVE nbr AS (
-            SELECT id, title, type, status, updated, file_path, body, 0 AS depth, ',' || id || ',' AS path
+            SELECT id, title, origin, status, updated_at, file_path, body, 0 AS depth, ',' || id || ',' AS path
             FROM nodes WHERE id = :start_id
 
             UNION ALL
 
-            SELECT n.id, n.title, n.type, n.status, n.updated, n.file_path, n.body,
+            SELECT n.id, n.title, n.origin, n.status, n.updated_at, n.file_path, n.body,
                    nb.depth + 1, nb.path || n.id || ','
             FROM nodes n
             JOIN edges e ON (e.to_id = n.id AND e.from_id = nb.id)
@@ -427,13 +425,13 @@ def get_neighborhood(conn, node_id: str, radius: int = 2) -> list[NodeSummary]:
             WHERE nb.depth < :radius
               AND instr(nb.path, ',' || n.id || ',') = 0
         )
-        SELECT DISTINCT id, title, type, status, updated, file_path, body
+        SELECT DISTINCT id, title, origin, status, updated_at, file_path, body
         FROM nbr WHERE id != :start_id
     """, {"start_id": node_id, "radius": radius}).fetchall()
 
     return [NodeSummary(
-        id=r["id"], title=r["title"], type=r["type"], status=r["status"],
-        updated=r["updated"], file_path=r["file_path"],
+        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
+        updated_at=r["updated_at"], file_path=r["file_path"],
         snippet=r["body"][:200] if r["body"] else "",
     ) for r in rows]
 
@@ -441,18 +439,18 @@ def get_neighborhood(conn, node_id: str, radius: int = 2) -> list[NodeSummary]:
 # ── Staleness detection ───────────────────────────────────────────────
 
 def get_stale_nodes(conn) -> list[dict]:
-    """Find synthesis pages whose sources have been updated since last compilation."""
+    """Find pages with outgoing source edges whose sources have been updated."""
     rows = conn.execute("""
         SELECT
             c.id AS concept_id,
             c.title AS concept_title,
-            c.updated AS concept_updated,
+            c.updated_at AS concept_updated,
             COUNT(s.id) AS updated_source_count,
             GROUP_CONCAT(s.title, ', ') AS updated_source_titles
         FROM nodes c
-        JOIN edges e ON e.from_id = c.id AND e.edge_type = 'sources'
-        JOIN nodes s ON s.id = e.to_id AND s.updated > c.updated
-        WHERE c.type IN ('concept', 'overview', 'comparison', 'question')
+        JOIN edges e ON e.from_id = c.id AND e.edge_type = 'source'
+        JOIN nodes s ON s.id = e.to_id AND s.updated_at > c.updated_at
+        WHERE EXISTS (SELECT 1 FROM edges WHERE from_id = c.id AND edge_type = 'source')
         GROUP BY c.id
         HAVING updated_source_count > 0
     """).fetchall()
@@ -480,7 +478,7 @@ def detect_new_sources(
     known_source_ids = {
         r["to_id"]
         for r in conn.execute(
-            "SELECT to_id FROM edges WHERE from_id = ? AND edge_type = 'sources'",
+            "SELECT to_id FROM edges WHERE from_id = ? AND edge_type = 'source'",
             (concept_id,),
         )
     }
@@ -500,21 +498,21 @@ def detect_new_sources(
             hit.node_id not in known_source_ids
             and hit.node_id != concept_id
             and hit.node_id not in meta_pages
-            and hit.updated > concept["updated"]
+            and hit.updated_at > concept["updated_at"]
         ):
             if embedding_provider and hit.vec_distance is not None:
                 if hit.vec_distance >= distance_threshold:
                     continue  # Too distant
             new_sources.append(NodeSummary(
-                id=hit.node_id, title=hit.title, type=hit.type,
-                status=hit.status, updated=hit.updated, snippet=hit.snippet,
+                id=hit.node_id, title=hit.title, origin=hit.origin,
+                status=hit.status, updated_at=hit.updated_at, snippet=hit.snippet,
             ))
 
     # Also surface pages that explicitly declared related: [[this concept]]
     # These bypass timestamp/distance filters — the user's declaration is the signal.
     seen_ids = {s.id for s in new_sources} | known_source_ids | {concept_id} | meta_pages
     reverse_related = conn.execute(
-        "SELECT n.id, n.title, n.type, n.status, n.updated, n.body "
+        "SELECT n.id, n.title, n.origin, n.status, n.updated_at, n.body "
         "FROM edges e JOIN nodes n ON e.from_id = n.id "
         "WHERE e.to_id = ? AND e.edge_type = 'related'",
         (concept_id,),
@@ -522,8 +520,8 @@ def detect_new_sources(
     for row in reverse_related:
         if row["id"] not in seen_ids:
             new_sources.append(NodeSummary(
-                id=row["id"], title=row["title"], type=row["type"],
-                status=row["status"], updated=row["updated"],
+                id=row["id"], title=row["title"], origin=row["origin"],
+                status=row["status"], updated_at=row["updated_at"],
                 snippet=row["body"][:200] if row["body"] else "",
             ))
             seen_ids.add(row["id"])
@@ -545,21 +543,34 @@ def explore(
     search_hits = hybrid_search(conn, topic, limit=10, embedding_provider=embedding_provider)
     result.search_results = search_hits
 
-    # Try to find an exact synthesis page (concept, overview, comparison, question)
-    synthesis_types = {"concept", "overview", "comparison", "question"}
+    # Find the best synthesis candidate by graph structure, not origin type
     synthesis_node = None
+    best_score = -1.0
     for hit in search_hits:
-        if hit.type in synthesis_types:
+        src_count = conn.execute(
+            "SELECT COUNT(*) FROM edges WHERE from_id = ? AND edge_type = 'source'",
+            (hit.node_id,),
+        ).fetchone()[0]
+        body_row = conn.execute("SELECT body FROM nodes WHERE id = ?", (hit.node_id,)).fetchone()
+        body_text = body_row["body"] if body_row else ""
+
+        score = hit.score
+        if src_count > 0:
+            score += min(src_count, 5) * 0.05
+        if "## Synthesis" in body_text:
+            score += 0.20
+
+        if score > best_score and (src_count > 0 or "## Synthesis" in body_text):
+            best_score = score
             synthesis_node = get_node_summary(conn, hit.node_id)
-            break
 
     if synthesis_node:
         result.synthesis = synthesis_node
-        result.synthesis_updated = synthesis_node.updated
+        result.synthesis_updated = synthesis_node.updated_at
 
         # Days since update
         try:
-            updated_date = datetime.strptime(synthesis_node.updated, "%Y-%m-%d").date()
+            updated_date = datetime.strptime(synthesis_node.updated_at, "%Y-%m-%d").date()
             result.days_since_update = (date.today() - updated_date).days
         except (ValueError, TypeError):
             pass
@@ -567,18 +578,18 @@ def explore(
         # Staleness: check if known sources were updated
         stale_sources = []
         source_edges = conn.execute(
-            "SELECT to_id FROM edges WHERE from_id = ? AND edge_type = 'sources'",
+            "SELECT to_id FROM edges WHERE from_id = ? AND edge_type = 'source'",
             (synthesis_node.id,),
         ).fetchall()
         for edge in source_edges:
             source = conn.execute(
-                "SELECT id, title, type, status, updated, file_path, body FROM nodes WHERE id = ? AND updated > ?",
-                (edge["to_id"], synthesis_node.updated),
+                "SELECT id, title, origin, status, updated_at, file_path, body FROM nodes WHERE id = ? AND updated_at > ?",
+                (edge["to_id"], synthesis_node.updated_at),
             ).fetchone()
             if source:
                 stale_sources.append(NodeSummary(
-                    id=source["id"], title=source["title"], type=source["type"],
-                    status=source["status"], updated=source["updated"],
+                    id=source["id"], title=source["title"], origin=source["origin"],
+                    status=source["status"], updated_at=source["updated_at"],
                     file_path=source["file_path"],
                     snippet=source["body"][:200] if source["body"] else "",
                 ))
@@ -594,15 +605,15 @@ def explore(
         # Graph context
         source_chain = get_source_chain(conn, synthesis_node.id)
         result.source_chain = [
-            NodeSummary(id=s["id"], title=s["title"], type=s["type"],
-                       status="", updated="")
+            NodeSummary(id=s["id"], title=s["title"], origin=s["origin"],
+                       status="", updated_at="")
             for s in source_chain if s["id"] != synthesis_node.id
         ]
 
         derived = get_derived_pages(conn, synthesis_node.id)
         result.derived_pages = [
-            NodeSummary(id=d["id"], title=d["title"], type=d["type"],
-                       status="", updated="")
+            NodeSummary(id=d["id"], title=d["title"], origin=d["origin"],
+                       status="", updated_at="")
             for d in derived
         ]
 
@@ -643,14 +654,14 @@ def explore(
 
 def list_nodes(
     conn,
-    type_filter: str | None = None,
+    origin_filter: str | None = None,
     tag_filter: str | None = None,
     status_filter: str | None = None,
-    sort: str = "updated",
+    sort: str = "updated_at",
     limit: int = 50,
 ) -> list[NodeSummary]:
     """Filtered/sorted listing of nodes."""
-    sql = "SELECT DISTINCT n.id, n.title, n.type, n.status, n.updated, n.file_path, n.body FROM nodes n"
+    sql = "SELECT DISTINCT n.id, n.title, n.origin, n.status, n.updated_at, n.file_path, n.body FROM nodes n"
     conditions = []
     params: list = []
 
@@ -659,9 +670,9 @@ def list_nodes(
         conditions.append("t.tag = ?")
         params.append(tag_filter)
 
-    if type_filter:
-        conditions.append("n.type = ?")
-        params.append(type_filter)
+    if origin_filter:
+        conditions.append("n.origin = ?")
+        params.append(origin_filter)
 
     if status_filter:
         conditions.append("n.status = ?")
@@ -670,14 +681,14 @@ def list_nodes(
     if conditions:
         sql += " WHERE " + " AND ".join(conditions)
 
-    sort_col = {"updated": "n.updated", "created": "n.created", "title": "n.title"}.get(sort, "n.updated")
+    sort_col = {"updated_at": "n.updated_at", "created_at": "n.created_at", "title": "n.title"}.get(sort, "n.updated_at")
     sql += f" ORDER BY {sort_col} DESC LIMIT ?"
     params.append(limit)
 
     rows = conn.execute(sql, params).fetchall()
     return [NodeSummary(
-        id=r["id"], title=r["title"], type=r["type"], status=r["status"],
-        updated=r["updated"], file_path=r["file_path"],
+        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
+        updated_at=r["updated_at"], file_path=r["file_path"],
         snippet=r["body"][:200] if r["body"] else "",
     ) for r in rows]
 
@@ -704,10 +715,10 @@ def get_status(conn) -> StatusResult:
     # Stale count
     stale = len(get_stale_nodes(conn))
 
-    # Type distribution
-    types = {}
-    for row in conn.execute("SELECT type, COUNT(*) as cnt FROM nodes GROUP BY type"):
-        types[row["type"]] = row["cnt"]
+    # Origin distribution
+    origins = {}
+    for row in conn.execute("SELECT origin, COUNT(*) as cnt FROM nodes GROUP BY origin"):
+        origins[row["origin"]] = row["cnt"]
 
     coverage = embedded / chunk_count if chunk_count > 0 else 0.0
 
@@ -719,5 +730,5 @@ def get_status(conn) -> StatusResult:
         embedding_coverage=coverage,
         stale_count=stale,
         orphan_chunks=orphans,
-        types=types,
+        origins=origins,
     )

@@ -100,11 +100,14 @@ Personal KB tool. Add a new page to the user's personal wiki. Writes a
 markdown file with frontmatter and indexes it in SQLite immediately. The
 page is searchable right away.
 
+The `origin` parameter specifies provenance — what kind of content this is:
+webpage, paper, conversation, note, book, transcript, meta.
+
 Use the `related` parameter to declare connections to existing pages (e.g.,
-related=["concepts/agent-memory"]). This creates graph edges that surface
-during kb_explore — the related concept will show the new page as an
-unincorporated source. Use `sources` for pages this was built FROM;
-use `related` for pages this is RELEVANT TO.
+related=["agent-memory"]). This creates graph edges that surface during
+kb_explore. Use `sources` for pages this was built FROM; use `related` for
+pages this is RELEVANT TO. Wikilinks are pathless: use "agent-memory" not
+"concepts/agent-memory".
 
 Does NOT trigger compilation — the caller decides when to compile.
 Does NOT fetch URLs — pass the content directly in the body parameter.
@@ -161,15 +164,15 @@ def _get_provider(conn):
 def kb_search(
     query: str,
     limit: int = 10,
-    type: str | None = None,
+    origin: str | None = None,
     sentiment: str | None = None,
     mode: str = "hybrid",
 ) -> list[dict]:
     """Hybrid FTS5 + vector search with Reciprocal Rank Fusion."""
     conn = _get_conn()
     filters = {}
-    if type:
-        filters["type"] = type
+    if origin:
+        filters["origin"] = origin
     if sentiment:
         filters["sentiment"] = sentiment
 
@@ -209,16 +212,16 @@ def kb_get(node_id: str) -> dict | None:
 
 @mcp.tool(description=_LIST_DESC)
 def kb_list(
-    type: str | None = None,
+    origin: str | None = None,
     tag: str | None = None,
     status: str | None = None,
-    sort: str = "updated",
+    sort: str = "updated_at",
     limit: int = 50,
 ) -> list[dict]:
     """Filtered/sorted listing of nodes."""
     conn = _get_conn()
     try:
-        nodes = list_nodes(conn, type_filter=type, tag_filter=tag,
+        nodes = list_nodes(conn, origin_filter=origin, tag_filter=tag,
                           status_filter=status, sort=sort, limit=limit)
         return [n.model_dump() for n in nodes]
     finally:
@@ -228,7 +231,7 @@ def kb_list(
 @mcp.tool(description=_ADD_DESC)
 def kb_add(
     title: str,
-    type: str,
+    origin: str,
     body: str,
     source_url: str = "",
     tags: list[str] | None = None,
@@ -242,30 +245,37 @@ def kb_add(
     sources = sources or []
     related = related or []
 
-    # Derive file path
+    # Derive file path — flat structure, no subdirectories
     slug = _slugify(title)
-    type_dirs = {
-        "source": "sources", "entity": "entities", "concept": "concepts",
-        "question": "questions", "comparison": "concepts",
-        "overview": "concepts", "meta": "meta", "domain": "concepts",
-    }
-    subdir = type_dirs.get(type, "concepts")
-    file_path = config.WIKI_DIR / subdir / f"{slug}.md"
+    file_path = config.WIKI_DIR / f"{slug}.md"
 
     # Check for conflicts
     if file_path.exists():
         return {"error": f"File already exists: {file_path.relative_to(config.VAULT_ROOT)}. Use kb_get + manual edit."}
 
+    # Check alias conflicts
+    from .markdown import normalize_alias
+    conn_check = _get_conn()
+    try:
+        slug_norm = normalize_alias(slug)
+        existing_alias = conn_check.execute(
+            "SELECT node_id FROM aliases WHERE alias_norm = ?", (slug_norm,)
+        ).fetchone()
+        if existing_alias:
+            return {"error": f"Slug '{slug}' conflicts with alias for node '{existing_alias['node_id']}'. Choose a different title."}
+    finally:
+        conn_check.close()
+
     # Generate frontmatter
     today = date.today().isoformat()
     fm_lines = [
         "---",
-        f"type: {type}",
         f'title: "{title}"',
-        f"created: {today}",
-        f"updated: {today}",
+        f"origin: {origin}",
         "status: seed",
     ]
+    if ingested_via:
+        fm_lines.append(f"ingested_via: {ingested_via}")
     if tags:
         fm_lines.append("tags:")
         for t in tags:
@@ -274,8 +284,6 @@ def kb_add(
         fm_lines.append(f'url: "{source_url}"')
     if sentiment:
         fm_lines.append(f"sentiment: {sentiment}")
-    if ingested_via:
-        fm_lines.append(f"ingested_via: {ingested_via}")
     if sources:
         fm_lines.append("sources:")
         for s in sources:
@@ -286,9 +294,11 @@ def kb_add(
             fm_lines.append(f'  - "[[{r}]]"')
     else:
         fm_lines.append("related: []")
+    fm_lines.append(f"created_at: {today}")
+    fm_lines.append(f"updated_at: {today}")
     fm_lines.append("---")
 
-    full_content = "\n".join(fm_lines) + "\n\n" + body
+    full_content = "\n".join(fm_lines) + f"\n\n# {title}\n\n## Notes\n\n" + body
 
     # Write file
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -341,13 +351,19 @@ def kb_synthesize(node_id: str, source_ids: list[str] | None = None) -> str:
             if page:
                 source_pages.append(page)
 
-        existing_body = existing.body if existing else "(new page -- create from scratch)"
         existing_title = existing.title if existing else node_id
+
+        # Extract only the ## Synthesis section for section-protected compilation
+        from .markdown import extract_section
+        if existing:
+            existing_synthesis = extract_section(existing.body, "Synthesis")
+        else:
+            existing_synthesis = ""
 
         sources_text = ""
         for sp in source_pages:
             sources_text += f"\n\n### [[{sp.id}]] — {sp.title}\n"
-            sources_text += f"Type: {sp.type} | Updated: {sp.updated}\n"
+            sources_text += f"Origin: {sp.origin} | Updated: {sp.updated_at}\n"
             sources_text += sp.body[:3000]
 
         # Scoped wikilink candidates: semantic search + graph neighbors
@@ -364,7 +380,7 @@ def kb_synthesize(node_id: str, source_ids: list[str] | None = None) -> str:
         if candidate_ids:
             placeholders = ",".join("?" * len(candidate_ids))
             available = conn.execute(
-                f"SELECT id, title FROM nodes WHERE id IN ({placeholders}) AND type != 'meta'",
+                f"SELECT id, title FROM nodes WHERE id IN ({placeholders}) AND origin != 'meta'",
                 list(candidate_ids),
             ).fetchall()
             page_list = "\n".join(f"- [[{r['id']}]] ({r['title']})" for r in available)
@@ -373,23 +389,25 @@ def kb_synthesize(node_id: str, source_ids: list[str] | None = None) -> str:
 
         return f"""## Synthesis task
 
-Rewrite [[{node_id}]] to incorporate the following new sources.
+Write or update the ## Synthesis section for [[{node_id}]] ({existing_title}).
 
-### Current page content ({existing_title})
-{existing_body}
+### Current synthesis section
+{existing_synthesis if existing_synthesis else "(no existing synthesis — create from scratch)"}
 
 ### Sources to incorporate
 {sources_text if sources_text else "(no new sources specified)"}
 
 ### Rules
-- Rewrite the existing page, don't append. The page should read as a coherent whole.
-- Update the `updated:` frontmatter field to today ({date.today().isoformat()}).
+- Return ONLY the content for the ## Synthesis section. Do NOT include the ## Synthesis heading itself.
+- Write a coherent synthesis that incorporates all sources. Do not just list them.
+- Update the `updated_at:` frontmatter field to today ({date.today().isoformat()}).
 - Add each new source to the `sources: []` list in frontmatter.
 - If any new source contradicts existing content, add a > [!contradiction] callout.
 - Preserve the frontmatter schema (flat YAML, all required fields).
 - When referring to concepts, entities, or topics that exist in the wiki, use [[slug]] wikilink notation inline in the prose. Only link to pages in this list:
 {page_list}
 - After writing the updated file to disk, you MUST immediately call kb_reindex(node_id="{node_id}") to update the search index. Do not proceed with other operations until reindexing completes.
+- Use the replace_or_insert_section helper or manually splice the synthesis content into the page, preserving all other sections (## Notes, etc.) untouched.
 """
     finally:
         conn.close()

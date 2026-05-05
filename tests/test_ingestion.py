@@ -58,32 +58,32 @@ class TestCompiledPages:
 
     def test_concept_pages_exist(self, vault_path):
         expected = [
-            "concepts/ai-coding-agents.md",
-            "concepts/llm-wiki-pattern.md",
-            "concepts/agent-memory.md",
-            "concepts/llm-context-scaling.md",
-            "concepts/mcp-ecosystem.md",
+            "ai-coding-agents.md",
+            "llm-wiki-pattern.md",
+            "agent-memory.md",
+            "llm-context-scaling.md",
+            "mcp-ecosystem.md",
         ]
         missing = [p for p in expected if not (vault_path / "wiki" / p).exists()]
         assert not missing, f"Missing concept pages: {missing}"
 
     def test_entity_pages_exist(self, vault_path):
         expected = [
-            "entities/claude-code.md",
-            "entities/mempalace.md",
-            "entities/obra-superpowers.md",
-            "entities/claude-obsidian.md",
+            "claude-code.md",
+            "mempalace.md",
+            "obra-superpowers.md",
+            "claude-obsidian.md",
         ]
         missing = [p for p in expected if not (vault_path / "wiki" / p).exists()]
         assert not missing, f"Missing entity pages: {missing}"
 
     def test_source_page_exists(self, vault_path):
-        path = vault_path / "wiki" / "sources" / "uncomfortable-truths-ai-coding-agents.md"
-        assert path.exists(), "Missing: sources/uncomfortable-truths-ai-coding-agents.md"
+        path = vault_path / "wiki" / "uncomfortable-truths-ai-coding-agents.md"
+        assert path.exists(), "Missing: uncomfortable-truths-ai-coding-agents.md"
 
     def test_uncomfortable_truths_frontmatter(self, vault_path):
         """The critical retrieval target must have correct frontmatter for BM25 matching."""
-        path = vault_path / "wiki" / "sources" / "uncomfortable-truths-ai-coding-agents.md"
+        path = vault_path / "wiki" / "uncomfortable-truths-ai-coding-agents.md"
         fm = _extract_frontmatter(path)
         assert fm is not None, "No frontmatter"
         assert fm.get("sentiment") == "critical", f"sentiment should be 'critical', got '{fm.get('sentiment')}'"
@@ -93,15 +93,24 @@ class TestCompiledPages:
         assert fm.get("url") or fm.get("source_url"), "Missing source URL"
 
     def test_concept_pages_have_sources(self, vault_path):
-        """Concept pages should reference raw briefings as sources."""
+        """Concept pages (origin=note) should reference raw briefings as sources."""
+        # Known concept-like pages (formerly in concepts/ subdirectory)
+        concept_slugs = [
+            "ai-coding-agents", "llm-wiki-pattern", "agent-memory",
+            "llm-context-scaling", "mcp-ecosystem",
+        ]
         failures = []
-        for p in (vault_path / "wiki" / "concepts").glob("*.md"):
+        for slug in concept_slugs:
+            p = vault_path / "wiki" / f"{slug}.md"
+            if not p.exists():
+                continue
             fm = _extract_frontmatter(p)
             if fm is None:
                 continue
             sources = fm.get("sources") or []
-            if not sources:
-                failures.append(f"{p.name}: no sources listed")
+            raw_sources = fm.get("raw_sources") or []
+            if not sources and not raw_sources:
+                failures.append(f"{p.name}: no sources or raw_sources listed")
         assert not failures, f"Concept pages without sources:\n" + "\n".join(failures)
 
 
@@ -134,18 +143,18 @@ class TestSandboxIngestion:
     def test_new_wiki_page_can_be_written(self, sandbox):
         """Smoke test: write a wiki page to the sandbox, verify it exists."""
         sandbox.write_wiki(
-            "sources/test-article.md",
-            "---\ntype: source\ntitle: Test Article\ncreated: 2026-04-11\n"
-            "updated: 2026-04-11\nstatus: seed\ntags:\n  - test\n---\n\n# Test\n\nBody.\n",
+            "test-article.md",
+            "---\norigin: webpage\ntitle: Test Article\ncreated_at: 2026-04-11\n"
+            "updated_at: 2026-04-11\nstatus: seed\ntags:\n  - test\n---\n\n# Test\n\nBody.\n",
         )
-        assert sandbox.wiki_exists("sources/test-article.md")
+        assert sandbox.wiki_exists("test-article.md")
 
     def test_sandbox_kb_indexes_new_page(self, sandbox):
         """Write a page, reindex, verify kb search finds it via BM25."""
         sandbox.write_wiki(
-            "concepts/test-concept.md",
-            "---\ntype: concept\ntitle: Test Concept\ncreated: 2026-04-11\n"
-            "updated: 2026-04-11\nstatus: seed\ntags:\n  - test\n---\n\n"
+            "test-concept.md",
+            "---\norigin: note\ntitle: Test Concept\ncreated_at: 2026-04-11\n"
+            "updated_at: 2026-04-11\nstatus: seed\ntags:\n  - test\n---\n\n"
             "# Test Concept\n\nThis is about banana quantum computing.\n",
         )
         sandbox.reindex()
@@ -197,7 +206,7 @@ class TestContradictionDetection:
         ~41k stars (Apr 11). The entity page should reflect the most
         recent data.
         """
-        mempalace = vault_path / "wiki" / "entities" / "mempalace.md"
+        mempalace = vault_path / "wiki" / "mempalace.md"
         if not mempalace.exists():
             pytest.skip("mempalace.md not found")
 
@@ -267,7 +276,7 @@ class TestDeltaTracking:
                 raw_path: {
                     "hash": file_hash,
                     "ingested_at": "2026-04-12",
-                    "pages_created": ["wiki/sources/test-reingest.md"],
+                    "pages_created": ["wiki/test-reingest.md"],
                     "pages_updated": ["wiki/index.md"],
                 }
             }

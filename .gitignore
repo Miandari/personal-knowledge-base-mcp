@@ -18,6 +18,9 @@ node_modules/
 # Resync backups
 .resync-backup/
 
+# Migration backups
+.backups/
+
 # Python
 __pycache__/
 *.pyc

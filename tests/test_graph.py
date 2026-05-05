@@ -33,16 +33,16 @@ class TestSourceChain:
 
     def test_concept_has_sources(self, conn):
         """ai-coding-agents should trace back to source pages."""
-        chain = get_source_chain(conn, "concepts/ai-coding-agents")
+        chain = get_source_chain(conn, "ai-coding-agents")
         ids = [c["id"] for c in chain]
-        assert "concepts/ai-coding-agents" in ids, "Self should be in chain"
+        assert "ai-coding-agents" in ids, "Self should be in chain"
         # Should have at least the uncomfortable-truths source
         assert any("uncomfortable-truths" in cid for cid in ids) or len(chain) > 1, \
             f"Source chain too short: {ids}"
 
     def test_source_page_chain(self, conn):
         """A source page's chain should include just itself (leaf node)."""
-        chain = get_source_chain(conn, "sources/uncomfortable-truths-ai-coding-agents")
+        chain = get_source_chain(conn, "uncomfortable-truths-ai-coding-agents")
         # Source pages may or may not have their own sources (raw files)
         assert len(chain) >= 1
 
@@ -52,7 +52,7 @@ class TestDerivedPages:
 
     def test_source_is_cited(self, conn):
         """uncomfortable-truths should be cited by ai-coding-agents."""
-        derived = get_derived_pages(conn, "sources/uncomfortable-truths-ai-coding-agents")
+        derived = get_derived_pages(conn, "uncomfortable-truths-ai-coding-agents")
         ids = [d["id"] for d in derived]
         # ai-coding-agents lists uncomfortable-truths as a source
         if ids:
@@ -65,7 +65,7 @@ class TestNeighborhood:
 
     def test_neighborhood_returns_neighbors(self, conn):
         """ai-coding-agents should have neighbors within 2 hops."""
-        neighbors = get_neighborhood(conn, "concepts/ai-coding-agents", radius=2)
+        neighbors = get_neighborhood(conn, "ai-coding-agents", radius=2)
         assert len(neighbors) > 0, "ai-coding-agents has no neighbors"
         ids = [n.id for n in neighbors]
         # Should include related entities/concepts
@@ -100,7 +100,7 @@ class TestExplore:
         assert result.topic == "AI coding agents"
         # Should find a synthesis page
         if result.synthesis:
-            assert result.synthesis.type in ("concept", "overview", "comparison", "question")
+            assert result.synthesis.origin in ("note", "webpage", "paper", "conversation", "book", "transcript", "meta")
             assert result.synthesis_updated is not None
 
     def test_explore_returns_search_results(self, conn):
@@ -140,21 +140,21 @@ class TestNodeRetrieval:
 
     def test_get_existing_node(self, conn):
         """Should return full details for a known page."""
-        detail = get_node(conn, "concepts/ai-coding-agents")
+        detail = get_node(conn, "ai-coding-agents")
         assert detail is not None
         assert detail.title == "AI coding agents"
-        assert detail.type == "concept"
+        assert detail.origin == "note"
         assert len(detail.body) > 100
         assert len(detail.tags) > 0
 
     def test_get_nonexistent_node(self, conn):
         """Should return None for unknown node."""
-        assert get_node(conn, "nonexistent/page") is None
+        assert get_node(conn, "nonexistent-page") is None
 
     def test_get_node_summary(self, conn):
         """Summary should have all required fields."""
-        summary = get_node_summary(conn, "entities/mempalace")
+        summary = get_node_summary(conn, "mempalace")
         assert summary is not None
         assert summary.title == "mempalace"
-        assert summary.type == "entity"
-        assert summary.updated
+        assert summary.origin == "note"
+        assert summary.updated_at

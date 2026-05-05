@@ -46,18 +46,18 @@ from pkb.server import (
 
 CONCEPT_ALPHA = textwrap.dedent("""\
 ---
-type: concept
+origin: note
 title: "Test Concept Alpha"
-created: 2026-01-01
-updated: 2026-01-15
+created_at: 2026-01-01
+updated_at: 2026-01-15
 status: developing
 tags:
   - ai
   - memory
 sources:
-  - "[[sources/test-paper-alpha]]"
+  - "[[test-paper-alpha]]"
 related:
-  - "[[concepts/test-concept-beta]]"
+  - "[[test-concept-beta]]"
 ---
 
 # Test Concept Alpha
@@ -74,10 +74,10 @@ infrastructure is a growing field in machine learning.
 
 PAPER_ALPHA = textwrap.dedent("""\
 ---
-type: source
+origin: webpage
 title: "Test Paper Alpha"
-created: 2026-01-01
-updated: 2026-04-01
+created_at: 2026-01-01
+updated_at: 2026-04-01
 status: developing
 sentiment: enthusiastic
 tags:
@@ -101,18 +101,18 @@ accuracy when using structured memory stores.
 
 CONCEPT_BETA = textwrap.dedent("""\
 ---
-type: concept
+origin: note
 title: "Test Concept Beta"
-created: 2026-02-01
-updated: 2026-03-01
+created_at: 2026-02-01
+updated_at: 2026-03-01
 status: seed
 tags:
   - ai
   - context
 sources:
-  - "[[sources/test-paper-beta]]"
+  - "[[test-paper-beta]]"
 related:
-  - "[[concepts/test-concept-alpha]]"
+  - "[[test-concept-alpha]]"
 ---
 
 # Test Concept Beta
@@ -127,10 +127,10 @@ suggest diminishing returns beyond certain thresholds.
 
 PAPER_BETA = textwrap.dedent("""\
 ---
-type: source
+origin: webpage
 title: "Test Paper Beta"
-created: 2026-02-01
-updated: 2026-02-15
+created_at: 2026-02-01
+updated_at: 2026-02-15
 status: developing
 sentiment: critical
 tags:
@@ -151,10 +151,10 @@ for proper information retrieval and memory management.
 
 ENTITY_TOOL = textwrap.dedent("""\
 ---
-type: entity
+origin: note
 title: "Test Tool Entity"
-created: 2026-01-01
-updated: 2026-02-01
+created_at: 2026-01-01
+updated_at: 2026-02-01
 status: developing
 tags:
   - memory
@@ -171,32 +171,32 @@ and semantic retrieval capabilities.
 
 META_INDEX = textwrap.dedent("""\
 ---
-type: meta
+origin: meta
 title: "Test Wiki Index"
-created: 2026-01-01
-updated: 2026-04-01
+created_at: 2026-01-01
+updated_at: 2026-04-01
 status: developing
 related: []
 ---
 
 # Test Wiki Index
 
-- [[concepts/test-concept-alpha|Test Concept Alpha]]
-- [[concepts/test-concept-beta|Test Concept Beta]]
-- [[sources/test-paper-alpha|Test Paper Alpha]]
-- [[sources/test-paper-beta|Test Paper Beta]]
-- [[entities/test-tool-entity|Test Tool Entity]]
+- [[test-concept-alpha|Test Concept Alpha]]
+- [[test-concept-beta|Test Concept Beta]]
+- [[test-paper-alpha|Test Paper Alpha]]
+- [[test-paper-beta|Test Paper Beta]]
+- [[test-tool-entity|Test Tool Entity]]
 """)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
-def _cleanup_added_page(slug: str, type_dir: str = "sources"):
+def _cleanup_added_page(slug: str, type_dir: str = ""):
     """Remove a page created by kb_add from disk and DB."""
-    fp = config.WIKI_DIR / type_dir / f"{slug}.md"
+    fp = config.WIKI_DIR / f"{slug}.md"
     if fp.exists():
         fp.unlink()
-    node_id = f"{type_dir}/{slug}"
+    node_id = slug
     conn = get_connection()
     try:
         # FTS5 virtual table doesn't cascade — delete manually
@@ -230,14 +230,13 @@ def mcp_sandbox(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("mcp_comprehensive")
     wiki_dir = tmp / "wiki"
 
-    for subdir in ("concepts", "sources", "entities", "meta", "questions"):
-        (wiki_dir / subdir).mkdir(parents=True)
+    wiki_dir.mkdir(parents=True, exist_ok=True)
 
-    (wiki_dir / "concepts" / "test-concept-alpha.md").write_text(CONCEPT_ALPHA)
-    (wiki_dir / "concepts" / "test-concept-beta.md").write_text(CONCEPT_BETA)
-    (wiki_dir / "sources" / "test-paper-alpha.md").write_text(PAPER_ALPHA)
-    (wiki_dir / "sources" / "test-paper-beta.md").write_text(PAPER_BETA)
-    (wiki_dir / "entities" / "test-tool-entity.md").write_text(ENTITY_TOOL)
+    (wiki_dir / "test-concept-alpha.md").write_text(CONCEPT_ALPHA)
+    (wiki_dir / "test-concept-beta.md").write_text(CONCEPT_BETA)
+    (wiki_dir / "test-paper-alpha.md").write_text(PAPER_ALPHA)
+    (wiki_dir / "test-paper-beta.md").write_text(PAPER_BETA)
+    (wiki_dir / "test-tool-entity.md").write_text(ENTITY_TOOL)
     (wiki_dir / "index.md").write_text(META_INDEX)
 
     orig = {
@@ -358,7 +357,7 @@ class TestKbSearchSandbox:
     def test_result_has_required_fields(self, mcp_sandbox):
         results = kb_search(query="memory", limit=5)
         r = results[0]
-        for field in ("node_id", "title", "type", "score", "snippet", "status", "updated"):
+        for field in ("node_id", "title", "origin", "score", "snippet", "status", "updated_at"):
             assert field in r, f"Missing field: {field}"
 
     def test_bm25_mode(self, mcp_sandbox):
@@ -367,16 +366,16 @@ class TestKbSearchSandbox:
         assert len(results) > 0
 
     def test_type_filter_concept(self, mcp_sandbox):
-        results = kb_search(query="test", limit=10, type="concept")
+        results = kb_search(query="test", limit=10, origin="note")
         assert len(results) > 0
         for r in results:
-            assert r["type"] == "concept"
+            assert r["origin"] == "note"
 
     def test_type_filter_source(self, mcp_sandbox):
-        results = kb_search(query="test", limit=10, type="source")
+        results = kb_search(query="test", limit=10, origin="webpage")
         assert len(results) > 0
         for r in results:
-            assert r["type"] == "source"
+            assert r["origin"] == "webpage"
 
     def test_sentiment_filter(self, mcp_sandbox):
         results = kb_search(query="paper", limit=10, sentiment="critical")
@@ -404,7 +403,7 @@ class TestKbSearchSandbox:
     def test_finds_page_by_body_content(self, mcp_sandbox):
         results = kb_search(query="retrieval-augmented generation", limit=5)
         ids = [r["node_id"] for r in results]
-        assert "concepts/test-concept-alpha" in ids
+        assert "test-concept-alpha" in ids
 
 
 class TestKbExploreSandbox:
@@ -427,8 +426,8 @@ class TestKbExploreSandbox:
         if result["synthesis"]:
             assert "id" in result["synthesis"]
             assert "title" in result["synthesis"]
-            assert result["synthesis"]["type"] in (
-                "concept", "overview", "comparison", "question"
+            assert result["synthesis"]["origin"] in (
+                "note", "webpage", "conversation", "transcript", "meta"
             )
 
     def test_unknown_topic_gives_suggestions(self, mcp_sandbox):
@@ -443,70 +442,70 @@ class TestKbExploreSandbox:
     def test_adjacent_topics_are_summaries(self, mcp_sandbox):
         result = kb_explore(topic="AI memory systems")
         for adj in result["adjacent_topics"]:
-            for field in ("id", "title", "type"):
+            for field in ("id", "title", "origin"):
                 assert field in adj
 
     def test_staleness_detected(self, mcp_sandbox):
         """concept-alpha (updated 2026-01-15) sources paper-alpha (updated 2026-04-01) → stale."""
         result = kb_explore(topic="AI memory systems agent")
-        if result.get("synthesis") and result["synthesis"]["id"] == "concepts/test-concept-alpha":
+        if result.get("synthesis") and result["synthesis"]["id"] == "test-concept-alpha":
             assert result["is_stale"] is True
             stale_ids = [s["id"] for s in result["stale_sources"]]
-            assert "sources/test-paper-alpha" in stale_ids
+            assert "test-paper-alpha" in stale_ids
 
 
 class TestKbGetSandbox:
     """kb_get with controlled test data."""
 
     def test_get_concept(self, mcp_sandbox):
-        r = kb_get(node_id="concepts/test-concept-alpha")
+        r = kb_get(node_id="test-concept-alpha")
         assert r is not None
         assert r["title"] == "Test Concept Alpha"
-        assert r["type"] == "concept"
+        assert r["origin"] == "note"
 
     def test_get_returns_body(self, mcp_sandbox):
-        r = kb_get(node_id="concepts/test-concept-alpha")
+        r = kb_get(node_id="test-concept-alpha")
         assert len(r["body"]) > 50
         assert "memory systems" in r["body"].lower()
 
     def test_get_returns_metadata(self, mcp_sandbox):
-        r = kb_get(node_id="concepts/test-concept-alpha")
+        r = kb_get(node_id="test-concept-alpha")
         assert r["status"] == "developing"
-        assert r["created"] == "2026-01-01"
-        assert r["updated"] == "2026-01-15"
+        assert r["created_at"] == "2026-01-01"
+        assert r["updated_at"] == "2026-01-15"
 
     def test_get_returns_tags(self, mcp_sandbox):
-        r = kb_get(node_id="concepts/test-concept-alpha")
+        r = kb_get(node_id="test-concept-alpha")
         assert isinstance(r["tags"], list)
         assert "ai" in r["tags"]
         assert "memory" in r["tags"]
 
     def test_get_returns_source_edges(self, mcp_sandbox):
-        r = kb_get(node_id="concepts/test-concept-alpha")
+        r = kb_get(node_id="test-concept-alpha")
         assert isinstance(r["sources"], list)
         source_ids = [s["id"] for s in r["sources"]]
-        assert "sources/test-paper-alpha" in source_ids
+        assert "test-paper-alpha" in source_ids
 
     def test_get_returns_related_edges(self, mcp_sandbox):
-        r = kb_get(node_id="concepts/test-concept-alpha")
+        r = kb_get(node_id="test-concept-alpha")
         assert isinstance(r["related"], list)
 
     def test_get_source_sentiment(self, mcp_sandbox):
-        r = kb_get(node_id="sources/test-paper-alpha")
+        r = kb_get(node_id="test-paper-alpha")
         assert r["sentiment"] == "enthusiastic"
 
     def test_get_source_url(self, mcp_sandbox):
-        r = kb_get(node_id="sources/test-paper-alpha")
+        r = kb_get(node_id="test-paper-alpha")
         assert r["url"] == "https://example.com/paper-alpha"
 
-    def test_get_entity_type(self, mcp_sandbox):
-        r = kb_get(node_id="entities/test-tool-entity")
-        assert r["entity_type"] == "product"
+    def test_get_entity_has_tags(self, mcp_sandbox):
+        r = kb_get(node_id="test-tool-entity")
+        assert "memory" in r["tags"] or "tool" in r["tags"]
 
     def test_get_meta_page(self, mcp_sandbox):
         r = kb_get(node_id="index")
         assert r is not None
-        assert r["type"] == "meta"
+        assert r["origin"] == "meta"
 
     def test_get_nonexistent_returns_none(self, mcp_sandbox):
         assert kb_get(node_id="nonexistent/page-xyz") is None
@@ -519,19 +518,16 @@ class TestKbListSandbox:
         results = kb_list()
         assert len(results) == 6  # 2 concepts + 2 sources + 1 entity + 1 meta
 
-    def test_list_by_type_concept(self, mcp_sandbox):
-        results = kb_list(type="concept")
-        assert len(results) == 2
-        assert all(r["type"] == "concept" for r in results)
+    def test_list_by_origin_note(self, mcp_sandbox):
+        results = kb_list(origin="note")
+        # 2 concepts + 1 entity = 3 note-origin pages
+        assert len(results) == 3
+        assert all(r["origin"] == "note" for r in results)
 
-    def test_list_by_type_source(self, mcp_sandbox):
-        results = kb_list(type="source")
+    def test_list_by_origin_webpage(self, mcp_sandbox):
+        results = kb_list(origin="webpage")
         assert len(results) == 2
-        assert all(r["type"] == "source" for r in results)
-
-    def test_list_by_type_entity(self, mcp_sandbox):
-        results = kb_list(type="entity")
-        assert len(results) == 1
+        assert all(r["origin"] == "webpage" for r in results)
 
     def test_list_by_tag(self, mcp_sandbox):
         results = kb_list(tag="memory")
@@ -553,7 +549,7 @@ class TestKbListSandbox:
 
     def test_list_result_structure(self, mcp_sandbox):
         r = kb_list(limit=1)[0]
-        for field in ("id", "title", "type", "status", "updated"):
+        for field in ("id", "title", "origin", "status", "updated_at"):
             assert field in r
 
 
@@ -562,148 +558,147 @@ class TestKbAddSandbox:
 
     def test_add_source(self, mcp_sandbox):
         try:
-            r = kb_add(title="Add Test Source", type="source",
+            r = kb_add(title="Add Test Source", origin="webpage",
                        body="# Test\n\nBody.", tags=["test"])
             assert "error" not in r
-            assert r["id"] == "sources/add-test-source"
-            assert (config.WIKI_DIR / "sources" / "add-test-source.md").exists()
+            assert r["id"] == "add-test-source"
+            assert (config.WIKI_DIR / "add-test-source.md").exists()
         finally:
-            _cleanup_added_page("add-test-source", "sources")
+            _cleanup_added_page("add-test-source")
 
     def test_add_concept(self, mcp_sandbox):
         try:
-            r = kb_add(title="Add Test Concept", type="concept", body="# C\n\nBody.")
+            r = kb_add(title="Add Test Concept", origin="note", body="# C\n\nBody.")
             assert "error" not in r
-            assert r["id"] == "concepts/add-test-concept"
+            assert r["id"] == "add-test-concept"
         finally:
-            _cleanup_added_page("add-test-concept", "concepts")
+            _cleanup_added_page("add-test-concept")
 
     def test_add_entity(self, mcp_sandbox):
         try:
-            r = kb_add(title="Add Test Entity", type="entity", body="# E\n\nBody.")
+            r = kb_add(title="Add Test Entity", origin="note", body="# E\n\nBody.")
             assert "error" not in r
-            assert r["id"] == "entities/add-test-entity"
+            assert r["id"] == "add-test-entity"
         finally:
-            _cleanup_added_page("add-test-entity", "entities")
+            _cleanup_added_page("add-test-entity")
 
     def test_add_with_all_params(self, mcp_sandbox):
         try:
             r = kb_add(
                 title="Add Full Params",
-                type="source",
+                origin="webpage",
                 body="# Full\n\nAll parameters.",
                 source_url="https://example.com/full",
                 tags=["tag-a", "tag-b"],
-                sources=["concepts/test-concept-alpha"],
+                sources=["test-concept-alpha"],
                 sentiment="critical",
                 ingested_via="web_fetch",
             )
             assert "error" not in r
 
-            content = (config.WIKI_DIR / "sources" / "add-full-params.md").read_text()
+            content = (config.WIKI_DIR / "add-full-params.md").read_text()
             assert "sentiment: critical" in content
             assert "ingested_via: web_fetch" in content
             assert 'url: "https://example.com/full"' in content
             assert "- tag-a" in content
             assert "- tag-b" in content
-            assert "[[concepts/test-concept-alpha]]" in content
+            assert "[[test-concept-alpha]]" in content
         finally:
-            _cleanup_added_page("add-full-params", "sources")
+            _cleanup_added_page("add-full-params")
 
     def test_add_conflict_returns_error(self, mcp_sandbox):
-        r = kb_add(title="Test Concept Alpha", type="concept", body="Dup.")
+        r = kb_add(title="Test Concept Alpha", origin="note", body="Dup.")
         assert "error" in r
 
     def test_add_immediately_searchable(self, mcp_sandbox):
         try:
-            kb_add(title="Unique Fnord Test", type="source",
+            kb_add(title="Unique Fnord Test", origin="webpage",
                    body="# Fnord\n\nThe word fnord appears here.", tags=["test"])
             results = kb_search(query="fnord", limit=5, mode="bm25")
             ids = [r["node_id"] for r in results]
-            assert "sources/unique-fnord-test" in ids
+            assert "unique-fnord-test" in ids
         finally:
-            _cleanup_added_page("unique-fnord-test", "sources")
+            _cleanup_added_page("unique-fnord-test")
 
     def test_add_frontmatter_format(self, mcp_sandbox):
         try:
-            kb_add(title="Frontmatter Check", type="source", body="Body.")
-            content = (config.WIKI_DIR / "sources" / "frontmatter-check.md").read_text()
+            kb_add(title="Frontmatter Check", origin="webpage", body="Body.")
+            content = (config.WIKI_DIR / "frontmatter-check.md").read_text()
             assert content.startswith("---\n")
-            assert "type: source" in content
+            assert "origin: webpage" in content
             assert 'title: "Frontmatter Check"' in content
-            assert f"created: {date.today().isoformat()}" in content
+            assert f"created_at: {date.today().isoformat()}" in content
             assert "status: seed" in content
             assert "related: []" in content
         finally:
-            _cleanup_added_page("frontmatter-check", "sources")
+            _cleanup_added_page("frontmatter-check")
 
     def test_add_mutable_defaults_safe(self, mcp_sandbox):
         """list params don't leak between calls."""
         try:
-            kb_add(title="Mutable A", type="source", body="A.", tags=["leaked"])
+            kb_add(title="Mutable A", origin="webpage", body="A.", tags=["leaked"])
         finally:
-            _cleanup_added_page("mutable-a", "sources")
+            _cleanup_added_page("mutable-a")
         try:
-            kb_add(title="Mutable B", type="source", body="B.")
-            content = (config.WIKI_DIR / "sources" / "mutable-b.md").read_text()
+            kb_add(title="Mutable B", origin="webpage", body="B.")
+            content = (config.WIKI_DIR / "mutable-b.md").read_text()
             assert "leaked" not in content
         finally:
-            _cleanup_added_page("mutable-b", "sources")
+            _cleanup_added_page("mutable-b")
 
 
 class TestKbSynthesizeSandbox:
     """kb_synthesize with controlled test data."""
 
     def test_returns_string(self, mcp_sandbox):
-        assert isinstance(kb_synthesize(node_id="concepts/test-concept-alpha"), str)
+        assert isinstance(kb_synthesize(node_id="test-concept-alpha"), str)
 
     def test_contains_synthesis_header(self, mcp_sandbox):
-        assert "Synthesis task" in kb_synthesize(node_id="concepts/test-concept-alpha")
+        assert "Synthesis task" in kb_synthesize(node_id="test-concept-alpha")
 
-    def test_includes_current_page_content(self, mcp_sandbox):
-        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+    def test_includes_current_page_title(self, mcp_sandbox):
+        r = kb_synthesize(node_id="test-concept-alpha")
         assert "Test Concept Alpha" in r
-        assert "memory systems" in r.lower()
 
     def test_includes_source_content(self, mcp_sandbox):
         r = kb_synthesize(
-            node_id="concepts/test-concept-alpha",
-            source_ids=["sources/test-paper-alpha"],
+            node_id="test-concept-alpha",
+            source_ids=["test-paper-alpha"],
         )
         assert "Test Paper Alpha" in r
 
     def test_contains_rules_section(self, mcp_sandbox):
-        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        r = kb_synthesize(node_id="test-concept-alpha")
         assert "### Rules" in r
 
     def test_reindex_rule_present(self, mcp_sandbox):
-        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        r = kb_synthesize(node_id="test-concept-alpha")
         assert "MUST immediately call kb_reindex" in r
 
     def test_reindex_rule_has_correct_node_id(self, mcp_sandbox):
-        r = kb_synthesize(node_id="concepts/test-concept-alpha")
-        assert 'kb_reindex(node_id="concepts/test-concept-alpha")' in r
+        r = kb_synthesize(node_id="test-concept-alpha")
+        assert 'kb_reindex(node_id="test-concept-alpha")' in r
 
     def test_different_node_id_in_reindex_rule(self, mcp_sandbox):
-        r = kb_synthesize(node_id="concepts/test-concept-beta")
-        assert 'kb_reindex(node_id="concepts/test-concept-beta")' in r
+        r = kb_synthesize(node_id="test-concept-beta")
+        assert 'kb_reindex(node_id="test-concept-beta")' in r
 
     def test_no_sources_shows_placeholder(self, mcp_sandbox):
-        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        r = kb_synthesize(node_id="test-concept-alpha")
         assert "no new sources specified" in r.lower()
 
     def test_nonexistent_page_creates_prompt(self, mcp_sandbox):
-        r = kb_synthesize(node_id="concepts/brand-new-topic")
+        r = kb_synthesize(node_id="brand-new-topic")
         assert isinstance(r, str)
         assert "create from scratch" in r.lower()
 
     def test_contains_today_date(self, mcp_sandbox):
-        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        r = kb_synthesize(node_id="test-concept-alpha")
         assert date.today().isoformat() in r
 
     def test_invalid_source_skipped_gracefully(self, mcp_sandbox):
         r = kb_synthesize(
-            node_id="concepts/test-concept-alpha",
+            node_id="test-concept-alpha",
             source_ids=["nonexistent/source-xyz"],
         )
         assert isinstance(r, str)
@@ -711,8 +706,8 @@ class TestKbSynthesizeSandbox:
 
     def test_multiple_sources(self, mcp_sandbox):
         r = kb_synthesize(
-            node_id="concepts/test-concept-alpha",
-            source_ids=["sources/test-paper-alpha", "sources/test-paper-beta"],
+            node_id="test-concept-alpha",
+            source_ids=["test-paper-alpha", "test-paper-beta"],
         )
         assert "Test Paper Alpha" in r
         assert "Test Paper Beta" in r
@@ -722,22 +717,22 @@ class TestKbReindexSandbox:
     """kb_reindex with controlled test data."""
 
     def test_by_node_id(self, mcp_sandbox):
-        r = kb_reindex(node_id="concepts/test-concept-alpha")
+        r = kb_reindex(node_id="test-concept-alpha")
         assert "error" not in r
-        assert r["id"] == "concepts/test-concept-alpha"
+        assert r["id"] == "test-concept-alpha"
 
     def test_by_relative_file_path(self, mcp_sandbox):
-        r = kb_reindex(file_path="wiki/concepts/test-concept-alpha.md")
+        r = kb_reindex(file_path="wiki/test-concept-alpha.md")
         assert "error" not in r
 
     def test_by_absolute_path(self, mcp_sandbox):
-        abs_path = str(config.WIKI_DIR / "concepts" / "test-concept-alpha.md")
+        abs_path = str(config.WIKI_DIR / "test-concept-alpha.md")
         r = kb_reindex(file_path=abs_path)
         assert "error" not in r
 
     def test_returns_summary_fields(self, mcp_sandbox):
-        r = kb_reindex(node_id="sources/test-paper-alpha")
-        for field in ("id", "title", "type"):
+        r = kb_reindex(node_id="test-paper-alpha")
+        for field in ("id", "title", "origin"):
             assert field in r
 
     def test_nonexistent_node_returns_error(self, mcp_sandbox):
@@ -761,7 +756,7 @@ class TestKbStatusSandbox:
         for key in (
             "node_count", "edge_count", "chunk_count",
             "embedded_chunks", "embedding_coverage",
-            "stale_count", "orphan_chunks", "types",
+            "stale_count", "orphan_chunks", "origins",
         ):
             assert key in r, f"Missing key: {key}"
 
@@ -769,11 +764,10 @@ class TestKbStatusSandbox:
         assert kb_status()["node_count"] == 6
 
     def test_type_distribution(self, mcp_sandbox):
-        types = kb_status()["types"]
-        assert types.get("concept") == 2
-        assert types.get("source") == 2
-        assert types.get("entity") == 1
-        assert types.get("meta") == 1
+        origins = kb_status()["origins"]
+        assert origins.get("note") == 3   # 2 concepts + 1 entity
+        assert origins.get("webpage") == 2
+        assert origins.get("meta") == 1
 
     def test_coverage_in_range(self, mcp_sandbox):
         cov = kb_status()["embedding_coverage"]
@@ -981,13 +975,13 @@ class TestHTTPTransport:
 
     def test_http_kb_get(self, http_client, session):
         r = self._call_tool(http_client, session, "kb_get", {
-            "node_id": "concepts/test-concept-alpha",
+            "node_id": "test-concept-alpha",
         })
         assert r["title"] == "Test Concept Alpha"
 
     def test_http_kb_list(self, http_client, session):
-        r = self._call_tool(http_client, session, "kb_list", {"type": "concept"})
-        assert len(r) == 2
+        r = self._call_tool(http_client, session, "kb_list", {"origin": "note"})
+        assert len(r) == 3  # 2 concepts + 1 entity = 3 note-origin pages
 
     def test_http_kb_explore(self, http_client, session):
         r = self._call_tool(http_client, session, "kb_explore", {"topic": "memory"})
@@ -1003,7 +997,7 @@ class TestHTTPTransport:
                 "method": "tools/call",
                 "params": {
                     "name": "kb_synthesize",
-                    "arguments": {"node_id": "concepts/test-concept-alpha"},
+                    "arguments": {"node_id": "test-concept-alpha"},
                 },
             },
             headers={"Mcp-Session-Id": session, **self._ACCEPT},
@@ -1026,30 +1020,30 @@ class TestWorkflows:
         try:
             kb_add(
                 title="Workflow Zephyr",
-                type="source",
+                origin="webpage",
                 body="# Zephyr\n\nA unique workflow test page about zephyr.",
                 tags=["workflow"],
                 sentiment="neutral",
             )
             results = kb_search(query="zephyr", limit=5, mode="bm25")
-            assert any(r["node_id"] == "sources/workflow-zephyr" for r in results)
+            assert any(r["node_id"] == "workflow-zephyr" for r in results)
 
-            detail = kb_get(node_id="sources/workflow-zephyr")
+            detail = kb_get(node_id="workflow-zephyr")
             assert detail["title"] == "Workflow Zephyr"
             assert detail["sentiment"] == "neutral"
         finally:
-            _cleanup_added_page("workflow-zephyr", "sources")
+            _cleanup_added_page("workflow-zephyr")
 
     def test_synthesize_includes_reindex_for_target(self, mcp_sandbox):
         """Synthesize prompt must include reindex instruction with correct node_id."""
         prompt = kb_synthesize(
-            node_id="concepts/test-concept-alpha",
-            source_ids=["sources/test-paper-alpha"],
+            node_id="test-concept-alpha",
+            source_ids=["test-paper-alpha"],
         )
-        assert 'kb_reindex(node_id="concepts/test-concept-alpha")' in prompt
+        assert 'kb_reindex(node_id="test-concept-alpha")' in prompt
 
         # Reindex should succeed for the same page
-        assert "error" not in kb_reindex(node_id="concepts/test-concept-alpha")
+        assert "error" not in kb_reindex(node_id="test-concept-alpha")
 
     def test_list_then_get_all(self, mcp_sandbox):
         """Every listed page must be retrievable."""
@@ -1057,21 +1051,21 @@ class TestWorkflows:
             detail = kb_get(node_id=page["id"])
             assert detail is not None, f"kb_get failed for {page['id']}"
             assert detail["title"] == page["title"]
-            assert detail["type"] == page["type"]
+            assert detail["origin"] == page["origin"]
 
     def test_status_types_match_list(self, mcp_sandbox):
         """Every type in status must list the reported count."""
-        for type_name, count in kb_status()["types"].items():
-            assert len(kb_list(type=type_name)) == count
+        for origin_name, count in kb_status()["origins"].items():
+            assert len(kb_list(origin=origin_name)) == count
 
     def test_add_then_status_increments(self, mcp_sandbox):
         """Adding a page should increase node_count by 1."""
         before = kb_status()["node_count"]
         try:
-            kb_add(title="Status Increment Test", type="source", body="Body.")
+            kb_add(title="Status Increment Test", origin="webpage", body="Body.")
             assert kb_status()["node_count"] == before + 1
         finally:
-            _cleanup_added_page("status-increment-test", "sources")
+            _cleanup_added_page("status-increment-test")
             # After cleanup, count should return to original
             assert kb_status()["node_count"] == before
 
@@ -1121,7 +1115,7 @@ class TestEdgeCases:
         assert isinstance(r, dict)
 
     def test_list_empty_type(self, mcp_sandbox):
-        results = kb_list(type="nonexistent_type_xyz")
+        results = kb_list(origin="nonexistent_origin_xyz")
         assert isinstance(results, list)
         assert len(results) == 0
 
@@ -1138,78 +1132,78 @@ class TestKbAddRelated:
         try:
             r = kb_add(
                 title="Related Param Test",
-                type="source",
+                origin="webpage",
                 body="# Test\n\nBody about related params.",
-                related=["concepts/test-concept-alpha", "concepts/test-concept-beta"],
+                related=["test-concept-alpha", "test-concept-beta"],
             )
             assert "error" not in r
-            content = (config.WIKI_DIR / "sources" / "related-param-test.md").read_text()
+            content = (config.WIKI_DIR / "related-param-test.md").read_text()
             assert "related:" in content
             assert "related: []" not in content
-            assert "[[concepts/test-concept-alpha]]" in content
-            assert "[[concepts/test-concept-beta]]" in content
+            assert "[[test-concept-alpha]]" in content
+            assert "[[test-concept-beta]]" in content
         finally:
-            _cleanup_added_page("related-param-test", "sources")
+            _cleanup_added_page("related-param-test")
 
     def test_add_with_related_creates_edges(self, mcp_sandbox):
         """related param creates 'related' edges in the database."""
         try:
             kb_add(
                 title="Related Edges Test",
-                type="source",
+                origin="webpage",
                 body="# Test\n\nBody about related edges.",
-                related=["concepts/test-concept-alpha"],
+                related=["test-concept-alpha"],
             )
             conn = get_connection()
             try:
                 edges = conn.execute(
                     "SELECT to_id FROM edges WHERE from_id = ? AND edge_type = 'related'",
-                    ("sources/related-edges-test",),
+                    ("related-edges-test",),
                 ).fetchall()
                 to_ids = [e["to_id"] for e in edges]
-                assert "concepts/test-concept-alpha" in to_ids
+                assert "test-concept-alpha" in to_ids
             finally:
                 conn.close()
         finally:
-            _cleanup_added_page("related-edges-test", "sources")
+            _cleanup_added_page("related-edges-test")
 
     def test_add_without_related_still_empty(self, mcp_sandbox):
         """Without related param, frontmatter has related: []."""
         try:
-            kb_add(title="No Related Test", type="source", body="Body.")
-            content = (config.WIKI_DIR / "sources" / "no-related-test.md").read_text()
+            kb_add(title="No Related Test", origin="webpage", body="Body.")
+            content = (config.WIKI_DIR / "no-related-test.md").read_text()
             assert "related: []" in content
         finally:
-            _cleanup_added_page("no-related-test", "sources")
+            _cleanup_added_page("no-related-test")
 
     def test_add_returns_suggested_related(self, mcp_sandbox):
         """kb_add response includes suggested_related list."""
         try:
             r = kb_add(
                 title="Suggest Test Page",
-                type="source",
+                origin="webpage",
                 body="# Memory\n\nAgent memory systems and retrieval patterns.",
             )
             assert "error" not in r
             assert "suggested_related" in r
             assert isinstance(r["suggested_related"], list)
         finally:
-            _cleanup_added_page("suggest-test-page", "sources")
+            _cleanup_added_page("suggest-test-page")
 
     def test_add_suggested_excludes_declared(self, mcp_sandbox):
         """Already-declared related pages are excluded from suggestions."""
         try:
             r = kb_add(
                 title="Declared Exclude Test",
-                type="source",
+                origin="webpage",
                 body="# Memory\n\nAgent memory systems for AI agents.",
-                related=["concepts/test-concept-alpha"],
+                related=["test-concept-alpha"],
             )
             assert "error" not in r
             suggested_ids = [s["id"] for s in r.get("suggested_related", [])]
-            assert "concepts/test-concept-alpha" not in suggested_ids
+            assert "test-concept-alpha" not in suggested_ids
         finally:
-            _cleanup_added_page("declared-exclude-test", "sources")
+            _cleanup_added_page("declared-exclude-test")
 
 
 class TestDetectNewSourcesRelated:
@@ -1222,9 +1216,9 @@ class TestDetectNewSourcesRelated:
 
         conn = get_connection()
         try:
-            candidates = detect_new_sources(conn, "concepts/test-concept-alpha")
+            candidates = detect_new_sources(conn, "test-concept-alpha")
             candidate_ids = [c.id for c in candidates]
-            assert "concepts/test-concept-beta" in candidate_ids
+            assert "test-concept-beta" in candidate_ids
         finally:
             conn.close()
 
@@ -1234,7 +1228,7 @@ class TestDetectNewSourcesRelated:
 
         conn = get_connection()
         try:
-            candidates = detect_new_sources(conn, "concepts/test-concept-alpha")
+            candidates = detect_new_sources(conn, "test-concept-alpha")
             candidate_ids = [c.id for c in candidates]
             assert len(candidate_ids) == len(set(candidate_ids))
         finally:
@@ -1247,9 +1241,9 @@ class TestDetectNewSourcesRelated:
         conn = get_connection()
         try:
             # paper-alpha IS a source of concept-alpha
-            candidates = detect_new_sources(conn, "concepts/test-concept-alpha")
+            candidates = detect_new_sources(conn, "test-concept-alpha")
             candidate_ids = [c.id for c in candidates]
-            assert "sources/test-paper-alpha" not in candidate_ids
+            assert "test-paper-alpha" not in candidate_ids
         finally:
             conn.close()
 
@@ -1259,30 +1253,30 @@ class TestSynthesizeWikilinks:
 
     def test_synthesize_includes_wikilink_instruction(self, mcp_sandbox):
         """Synthesis prompt tells the LLM to use [[slug]] notation."""
-        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        r = kb_synthesize(node_id="test-concept-alpha")
         assert "[[slug]] wikilink notation" in r.lower() or "wikilink notation" in r.lower()
 
     def test_synthesize_includes_available_pages(self, mcp_sandbox):
         """Synthesis prompt lists linkable pages."""
-        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        r = kb_synthesize(node_id="test-concept-alpha")
         # Should include at least some of the test pages as candidates
         assert "[[" in r
         # The page list section should contain at least one test page
         has_test_page = any(
             slug in r
             for slug in [
-                "concepts/test-concept-beta",
-                "sources/test-paper-alpha",
-                "entities/test-tool-entity",
+                "test-concept-beta",
+                "test-paper-alpha",
+                "test-tool-entity",
             ]
         )
         assert has_test_page, "No test pages found in synthesis wikilink candidates"
 
     def test_synthesize_excludes_self(self, mcp_sandbox):
         """The page being synthesized is not in its own link candidates."""
-        r = kb_synthesize(node_id="concepts/test-concept-alpha")
+        r = kb_synthesize(node_id="test-concept-alpha")
         # Link candidates are formatted as "- [[slug]] (Title)"
         # The node_id appears elsewhere (header, reindex rule) but not as a candidate
         import re
         candidates = re.findall(r"^- \[\[([^\]]+)\]\]", r, re.MULTILINE)
-        assert "concepts/test-concept-alpha" not in candidates
+        assert "test-concept-alpha" not in candidates

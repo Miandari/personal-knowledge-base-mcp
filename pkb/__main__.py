@@ -70,7 +70,7 @@ def cmd_status(args):
     print(f"Coverage:   {status.embedding_coverage:.0%}")
     print(f"Stale:      {status.stale_count}")
     print(f"Orphans:    {status.orphan_chunks}")
-    print(f"Types:      {json.dumps(status.types)}")
+    print(f"Origins:    {json.dumps(status.origins)}")
 
     conn.close()
 
@@ -86,7 +86,7 @@ def cmd_search(args):
     # Determine search mode
     filters = {}
     if args.type:
-        filters["type"] = args.type
+        filters["origin"] = args.type
     if args.sentiment:
         filters["sentiment"] = args.sentiment
 
@@ -103,8 +103,8 @@ def cmd_search(args):
             print("No results.")
         for i, r in enumerate(results, 1):
             dist_str = f"  vec_dist={r.vec_distance:.4f}" if r.vec_distance is not None else ""
-            print(f"{i}. [{r.type}] {r.title} (score={r.score:.6f}{dist_str})")
-            print(f"   {r.node_id}  updated={r.updated}")
+            print(f"{i}. [{r.origin}] {r.title} (score={r.score:.6f}{dist_str})")
+            print(f"   {r.node_id}  updated={r.updated_at}")
             if r.snippet:
                 print(f"   {r.snippet[:120]}...")
             print()

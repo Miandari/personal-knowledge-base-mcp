@@ -103,27 +103,28 @@ class TestWikilinkResolution:
     """Test wikilink → node ID resolution."""
 
     def test_exact_match(self):
-        table = {"concepts/ai-coding-agents": ["concepts/ai-coding-agents"]}
-        assert resolve_wikilink("concepts/ai-coding-agents", table) == "concepts/ai-coding-agents"
+        table = {"ai-coding-agents": ["ai-coding-agents"]}
+        assert resolve_wikilink("ai-coding-agents", table) == "ai-coding-agents"
 
-    def test_slug_suffix_match(self):
-        table = {"concepts/ai-coding-agents": ["concepts/ai-coding-agents"]}
-        assert resolve_wikilink("ai-coding-agents", table) == "concepts/ai-coding-agents"
+    def test_legacy_path_prefix_stripped(self):
+        """Old-style [[concepts/agent-memory]] resolves via basename stripping."""
+        table = {"ai-coding-agents": ["ai-coding-agents"]}
+        assert resolve_wikilink("concepts/ai-coding-agents", table) == "ai-coding-agents"
 
     def test_case_insensitive(self):
-        table = {"concepts/ai-coding-agents": ["concepts/ai-coding-agents"]}
-        assert resolve_wikilink("AI-Coding-Agents", table) == "concepts/ai-coding-agents"
+        table = {"ai-coding-agents": ["ai-coding-agents"]}
+        assert resolve_wikilink("AI-Coding-Agents", table) == "ai-coding-agents"
 
     def test_unresolved(self):
-        table = {"concepts/ai-coding-agents": ["concepts/ai-coding-agents"]}
+        table = {"ai-coding-agents": ["ai-coding-agents"]}
         assert resolve_wikilink("nonexistent-page", table) is None
 
     def test_raw_file_skipped(self):
-        table = {"concepts/ai-coding-agents": ["concepts/ai-coding-agents"]}
+        table = {"ai-coding-agents": ["ai-coding-agents"]}
         assert resolve_wikilink(".raw/notion/2026-03-28.md", table) is None
 
     def test_ambiguous_alias(self):
-        table = {"agent": ["concepts/ai-agent", "entities/agent-framework"]}
+        table = {"agent": ["ai-agent", "agent-framework"]}
         assert resolve_wikilink("agent", table) is None
 
 
@@ -159,12 +160,12 @@ class TestSlugFromPath:
     def test_concept_path(self):
         wiki = Path("/vault/wiki")
         fp = Path("/vault/wiki/concepts/ai-coding-agents.md")
-        assert slug_from_path(fp, wiki) == "concepts/ai-coding-agents"
+        assert slug_from_path(fp, wiki) == "ai-coding-agents"
 
     def test_nested_path(self):
         wiki = Path("/vault/wiki")
         fp = Path("/vault/wiki/meta/tag-registry.md")
-        assert slug_from_path(fp, wiki) == "meta/tag-registry"
+        assert slug_from_path(fp, wiki) == "tag-registry"
 
 
 class TestIndexerLiveVault:
@@ -184,10 +185,10 @@ class TestIndexerLiveVault:
 
         # ai-coding-agents has sources AND related
         ai_edges = live_db.execute(
-            "SELECT edge_type, COUNT(*) as cnt FROM edges WHERE from_id = 'concepts/ai-coding-agents' GROUP BY edge_type"
+            "SELECT edge_type, COUNT(*) as cnt FROM edges WHERE from_id = 'ai-coding-agents' GROUP BY edge_type"
         ).fetchall()
         edge_types = {r["edge_type"]: r["cnt"] for r in ai_edges}
-        assert "related" in edge_types or "wikilink" in edge_types, f"ai-coding-agents has no related/wikilink edges: {edge_types}"
+        assert "related" in edge_types or "link" in edge_types, f"ai-coding-agents has no related/link edges: {edge_types}"
 
     def test_tag_extraction(self, live_db):
         """Tags should be populated from frontmatter."""
@@ -196,7 +197,7 @@ class TestIndexerLiveVault:
 
         # uncomfortable-truths should have 'ai-coding-agents' tag
         has_tag = live_db.execute(
-            "SELECT 1 FROM tags WHERE node_id = 'sources/uncomfortable-truths-ai-coding-agents' AND tag = 'ai-coding-agents'"
+            "SELECT 1 FROM tags WHERE node_id = 'uncomfortable-truths-ai-coding-agents' AND tag = 'ai-coding-agents'"
         ).fetchone()
         assert has_tag, "uncomfortable-truths missing 'ai-coding-agents' tag"
 
@@ -241,8 +242,8 @@ class TestIndexerSandbox:
         wiki_dir.mkdir(parents=True)
         page = wiki_dir / "test-concept.md"
         page.write_text(
-            "---\ntype: concept\ntitle: Test Concept\ncreated: 2026-04-12\n"
-            "updated: 2026-04-12\nstatus: seed\ntags:\n  - test\n---\n\n"
+            "---\norigin: concept\ntitle: Test Concept\ncreated_at: 2026-04-12\n"
+            "updated_at: 2026-04-12\nstatus: seed\ntags:\n  - test\n---\n\n"
             "# Test Concept\n\nSome content about testing."
         )
 
@@ -251,16 +252,16 @@ class TestIndexerSandbox:
         stats = indexer.rebuild()
 
         assert stats["files_indexed"] == 1
-        node = tmp_db.execute("SELECT * FROM nodes WHERE id = 'concepts/test-concept'").fetchone()
+        node = tmp_db.execute("SELECT * FROM nodes WHERE id = 'test-concept'").fetchone()
         assert node is not None
         assert node["title"] == "Test Concept"
-        assert node["type"] == "concept"
+        assert node["origin"] == "concept"
 
     def test_incremental_skip(self, tmp_db, tmp_path):
         wiki_dir = tmp_path / "wiki" / "concepts"
         wiki_dir.mkdir(parents=True)
         page = wiki_dir / "test.md"
-        page.write_text("---\ntype: concept\ntitle: Test\ncreated: 2026-04-12\nupdated: 2026-04-12\nstatus: seed\n---\n\nBody.")
+        page.write_text("---\norigin: concept\ntitle: Test\ncreated_at: 2026-04-12\nupdated_at: 2026-04-12\nstatus: seed\n---\n\nBody.")
 
         provider = NoopEmbedding()
         indexer = Indexer(tmp_db, wiki_dir=tmp_path / "wiki", embedding_provider=provider)
@@ -279,14 +280,14 @@ class TestIndexerSandbox:
         wiki_dir = tmp_path / "wiki" / "concepts"
         wiki_dir.mkdir(parents=True)
         page = wiki_dir / "to-delete.md"
-        page.write_text("---\ntype: concept\ntitle: Delete Me\ncreated: 2026-04-12\nupdated: 2026-04-12\nstatus: seed\n---\n\nBody.")
+        page.write_text("---\norigin: concept\ntitle: Delete Me\ncreated_at: 2026-04-12\nupdated_at: 2026-04-12\nstatus: seed\n---\n\nBody.")
 
         provider = NoopEmbedding()
         indexer = Indexer(tmp_db, wiki_dir=tmp_path / "wiki", embedding_provider=provider)
         indexer.rebuild()
 
-        # Verify it's indexed
-        assert tmp_db.execute("SELECT 1 FROM nodes WHERE id = 'concepts/to-delete'").fetchone()
+        # Verify it's indexed (flat slug, no path prefix)
+        assert tmp_db.execute("SELECT 1 FROM nodes WHERE id = 'to-delete'").fetchone()
 
         # Delete the file and re-index
         page.unlink()
@@ -295,13 +296,13 @@ class TestIndexerSandbox:
         assert stats["files_deleted"] == 1
 
         # Node should be gone
-        assert tmp_db.execute("SELECT 1 FROM nodes WHERE id = 'concepts/to-delete'").fetchone() is None
+        assert tmp_db.execute("SELECT 1 FROM nodes WHERE id = 'to-delete'").fetchone() is None
 
     def test_dry_run(self, tmp_db, tmp_path):
         wiki_dir = tmp_path / "wiki" / "concepts"
         wiki_dir.mkdir(parents=True)
         page = wiki_dir / "test.md"
-        page.write_text("---\ntype: concept\ntitle: Test\ncreated: 2026-04-12\nupdated: 2026-04-12\nstatus: seed\n---\n\nBody.")
+        page.write_text("---\norigin: concept\ntitle: Test\ncreated_at: 2026-04-12\nupdated_at: 2026-04-12\nstatus: seed\n---\n\nBody.")
 
         indexer = Indexer(tmp_db, wiki_dir=tmp_path / "wiki", dry_run=True)
         stats = indexer.rebuild()

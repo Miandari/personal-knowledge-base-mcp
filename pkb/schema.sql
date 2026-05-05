@@ -5,17 +5,15 @@
 -- NODES: one row per markdown page
 -- ═══════════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS nodes (
-    id            TEXT PRIMARY KEY,    -- slug: "concepts/ai-coding-agents"
-    file_path     TEXT NOT NULL UNIQUE,-- "wiki/concepts/ai-coding-agents.md"
+    id            TEXT PRIMARY KEY,    -- slug: "agent-memory"
+    file_path     TEXT NOT NULL UNIQUE,-- "wiki/agent-memory.md"
     title         TEXT NOT NULL,
-    type          TEXT NOT NULL,       -- source|entity|concept|domain|comparison|question|overview|meta
+    origin        TEXT NOT NULL,       -- webpage|paper|conversation|note|book|transcript|meta
     status        TEXT NOT NULL DEFAULT 'seed',
-    created       TEXT NOT NULL,       -- YYYY-MM-DD
-    updated       TEXT NOT NULL,
+    created_at    TEXT NOT NULL,       -- YYYY-MM-DD
+    updated_at    TEXT NOT NULL,
     -- Denormalized filterable fields
     sentiment     TEXT,
-    source_type   TEXT,
-    entity_type   TEXT,
     complexity    TEXT,
     confidence    TEXT,
     ingested_via  TEXT,
@@ -36,7 +34,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 CREATE TABLE IF NOT EXISTS edges (
     from_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
     to_id     TEXT NOT NULL,  -- may reference unindexed node (dangling OK)
-    edge_type TEXT NOT NULL,
+    edge_type TEXT NOT NULL,  -- 'source', 'related', 'link'
     PRIMARY KEY (from_id, to_id, edge_type)
 );
 
@@ -50,10 +48,13 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 
 CREATE TABLE IF NOT EXISTS aliases (
-    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    alias   TEXT NOT NULL COLLATE NOCASE,
-    PRIMARY KEY (node_id, alias)
+    alias_norm TEXT PRIMARY KEY,    -- normalized: "concepts/agent-memory" or "agent-memory"
+    alias      TEXT NOT NULL,       -- original form: "Agent Memory", "concepts/agent-memory"
+    node_id    TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    alias_kind TEXT,                -- 'title', 'old_path', 'manual', 'former_slug'
+    created_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_aliases_node ON aliases(node_id);
 
 -- ═══════════════════════════════════════════════════════════════
 -- CHUNKS: sub-page segments for embedding granularity
@@ -104,8 +105,8 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
 -- ═══════════════════════════════════════════════════════════════
 CREATE INDEX IF NOT EXISTS idx_edges_to       ON edges(to_id, edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_from     ON edges(from_id, edge_type);
-CREATE INDEX IF NOT EXISTS idx_nodes_type     ON nodes(type);
-CREATE INDEX IF NOT EXISTS idx_nodes_updated  ON nodes(updated);
+CREATE INDEX IF NOT EXISTS idx_nodes_origin   ON nodes(origin);
+CREATE INDEX IF NOT EXISTS idx_nodes_updated  ON nodes(updated_at);
 CREATE INDEX IF NOT EXISTS idx_nodes_status   ON nodes(status);
 CREATE INDEX IF NOT EXISTS idx_chunks_node    ON chunks(node_id);
 CREATE INDEX IF NOT EXISTS idx_tags_tag       ON tags(tag);
