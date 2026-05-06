@@ -21,15 +21,18 @@ from .search import (
 
 mcp = FastMCP("pkb", instructions="""\
 Personal knowledge base tools. These access the user's PERSONAL compiled \
-wiki of notes, ingested articles, papers, and synthesis pages — NOT the \
-public internet. Topics include AI tooling, agent memory, MCP ecosystem, \
-LLM context scaling, AI coding agents, and computational social science, \
-but the collection grows over time.
+wiki — a curated collection of notes, ingested articles, papers, and \
+synthesis pages. NOT the public internet.
 
-Only use these tools when the user asks about their personal notes, KB, \
-wiki, or vault. Trigger phrases: "in my KB", "in my notes", "check my \
-vault", "what do I know about", "explore:", "query:", "kb:". For general \
-knowledge questions, prefer web search or your own training data.""")
+Use these tools when the user asks about their personal notes, KB, wiki, \
+or vault. Trigger phrases: "in my KB", "in my notes", "check my vault", \
+"what do I know about", "explore:", "query:", "kb:". For general knowledge \
+questions, prefer web search or your own training data.
+
+Start with kb_explore for topic overviews. Use kb_search for specific \
+queries. After any file write, always call kb_reindex. When compiling, \
+use kb_synthesize to get the synthesis prompt — it contains wikilink \
+candidates and section protection rules.""")
 
 _KB_TOKEN = os.getenv("KB_MCP_TOKEN")
 
@@ -40,7 +43,7 @@ Personal KB tool. Search the user's personal knowledge base using hybrid
 retrieval (FTS5 + vector + RRF).
 
 Use this when the user wants to find specific pages matching a query, or
-needs type/sentiment filters. Returns ranked results with titles, types,
+needs origin/sentiment filters. Returns ranked results with titles, origins,
 scores, and snippets from their curated collection.
 
 For general topic overviews ("kb: agent memory", "what do I know about X"),
@@ -69,7 +72,7 @@ of everything the KB knows about a topic.
 
 Prefer this over kb_search when the user wants a topic overview. Use
 kb_search instead only when the user wants to find specific pages matching
-a precise query or needs type/sentiment filters.
+a precise query or needs origin/sentiment filters.
 
 DO NOT use this for general knowledge questions — use web search instead.
 DO NOT use this to retrieve a specific page — use kb_get instead."""
@@ -86,7 +89,7 @@ DO NOT guess node IDs — search or explore first to find valid IDs."""
 
 _LIST_DESC = """\
 Personal KB tool. Browse and filter pages in the user's personal wiki by
-type, tag, or status. Returns summaries sorted by the chosen field.
+origin, tag, or status. Returns summaries sorted by the chosen field.
 
 Use this when the user wants to see what's in their KB — inventorying
 pages, filtering by topic area, or browsing recent additions.
@@ -116,16 +119,19 @@ a list of existing pages that are semantically similar. The user can
 confirm which suggestions to link."""
 
 _SYNTHESIZE_DESC = """\
-Personal KB tool. Assemble a synthesis/compilation prompt for rewriting a
-page in the user's personal wiki. Returns a structured string containing
-the current page content, source pages to incorporate, and rewrite rules.
+Personal KB tool. Assemble a synthesis/compilation prompt for a page in the
+user's personal wiki. Returns a structured string containing the existing
+## Synthesis section content, source pages to incorporate, available
+wikilink slugs, and rewrite rules.
 
-This tool does NOT call an LLM — it returns context for the calling LLM to
-use when rewriting the page. After using the returned prompt to rewrite the
-file, you MUST call kb_reindex on the rewritten file.
+Section-protected: only the ## Synthesis section is passed to you for
+rewriting. All other sections (## Notes, user content) are preserved
+untouched. After writing the updated file, you MUST call kb_reindex.
+
+This tool does NOT call an LLM — it returns context for the calling LLM.
 
 DO NOT call this without reading the result — it contains critical rewrite
-rules including the reindex requirement."""
+rules including the reindex requirement and wikilink instructions."""
 
 _REINDEX_DESC = """\
 Personal KB tool. Re-index a single file after writing or editing it in the
@@ -144,7 +150,7 @@ Returns node count, edge count, chunk count, embedding coverage percentage,
 stale page count, and orphan chunk count.
 
 Use this to verify the index is healthy before searching. If embedding
-coverage is below 100%, run `python -m pkb rebuild` to fix it."""
+coverage is below 100%, run `pkb rebuild` to fix it."""
 
 
 _NO_VAULT_MSG = (
