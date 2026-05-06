@@ -2,6 +2,14 @@
 
 Installable personal knowledge base MCP server. See @README.md for architecture.
 
+## Vision
+
+pkb is a personal knowledge base for individuals who learn across many domains. You encounter valuable insights in LLM conversations, articles, videos, and books — pkb gives you one place to store them, find them later, and build connections between them over time.
+
+The system handles what's hard to do manually at scale: tagging, linking related pages, embedding for search, and synthesizing multiple sources into coherent wiki pages. The human decides what's worth adding and when to synthesize — the system never adds or rewrites content without being asked.
+
+Each wiki page should be worth reading on its own. Features that help the user consolidate, connect, and improve what's already in the wiki are more valuable than features that add more content automatically.
+
 ## Repo structure
 
 This is the **software repo**, not a vault. Personal wiki content lives in a separate vault directory.
