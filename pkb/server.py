@@ -37,18 +37,26 @@ _KB_TOKEN = os.getenv("KB_MCP_TOKEN")
 
 _FIND_DESC = """\
 Personal KB tool. Find and retrieve pages from the user's personal wiki.
+Use this when the user asks about their own knowledge, notes, or things
+they've previously saved — NOT for general knowledge questions.
 
 Modes (determined by parameters):
 - Search: kb_find(query="agent memory") — hybrid FTS5 + vector search.
   Returns ranked results with scores and snippets. Use "hybrid" mode
   (default) for best quality; "bm25" for exact keyword matching.
+  Can combine with origin/sentiment filters for scoped search.
 - Get page: kb_find(id="agent-memory") — full page content + metadata +
   graph edges (sources, sourced_by, related, wikilinks).
+  Returns None if the page doesn't exist.
 - Browse: kb_find(origin="paper") or kb_find(tag="rag") — filtered listing
-  sorted by the chosen field.
+  of page summaries, sorted by the chosen field. Use id= to get full content.
 
 Results are ranked by Reciprocal Rank Fusion score. Only ordering matters —
 do not interpret raw score values as similarity percentages.
+
+When adding new content via kb_save, search first to find existing pages
+on the same topic — this avoids duplicates and helps identify related
+pages to link.
 
 DO NOT use this for general knowledge questions — use web search instead.
 DO NOT guess node IDs — search first to find valid IDs."""
@@ -57,22 +65,37 @@ _SAVE_DESC = """\
 Personal KB tool. Create, update, or reindex pages in the user's personal
 wiki. Automatically reindexes after every write.
 
+IMPORTANT: Before saving, always draft the proposed title, body, tags,
+origin, and related links and show them to the user. Suggest relevant tags
+based on the content. Get explicit approval before calling this tool.
+
 Modes (determined by parameters):
-- Create new page: kb_save(title="...", origin="note", body="...")
-- Update metadata: kb_save(id="...", tags=["..."], related=["..."])
-- Update a section: kb_save(id="...", section="Summary", body="new content")
-- Replace body: kb_save(id="...", body="new full body")
+- Create: kb_save(title="...", origin="note", body="...")
+  Required: title, origin, body. Body should NOT include the # Title
+  heading — the system adds it automatically.
+- Update metadata: kb_save(id="...", tags=["a", "b"], related=["page-id"])
+  Replaces the field with the given values. Pass [] to clear.
+  Omit a parameter to leave that field unchanged.
+- Update a section: kb_save(id="...", section="Summary", body="...")
+  Creates the section if missing, replaces if it exists.
+  Body should NOT include the ## heading.
+- Replace body: kb_save(id="...", body="full new body")
 - Reindex after external edit: kb_save(id="...")
 
-The `origin` field specifies provenance: webpage, paper, conversation,
-note, book, transcript, meta.
+Origin values: webpage, paper, conversation, note, book, transcript, meta.
 
 Use `sources` for pages this was built FROM (creates source edges).
 Use `related` for pages this is RELEVANT TO (creates related edges).
 Wikilinks are pathless: use "agent-memory" not "concepts/agent-memory".
 
-On create, returns `suggested_related` (semantically similar pages) and
-`suggested_tags` (common tags from similar pages) to help link new content.
+On create, returns `suggested_related` and `suggested_tags` from similar
+pages. Present these to the user — if they confirm, call kb_save again
+with kb_save(id="...", related=[...]) or kb_save(id="...", tags=[...]).
+
+When saving insights from the current conversation, set origin="conversation".
+If conversation_search is available, use it to find the chat URL and pass
+it as source_url. Capture the actual insight in the body, not just a
+reference to the discussion.
 
 Does NOT fetch URLs — pass content directly in the body parameter."""
 
@@ -81,8 +104,9 @@ Personal KB tool. Health check for the user's personal knowledge base index.
 Returns node count, edge count, chunk count, embedding coverage percentage,
 stale page count, and orphan chunk count.
 
-Use this to verify the index is healthy before searching. If embedding
-coverage is below 100%, run `pkb rebuild` to fix it."""
+Use this when the user asks about their wiki's health, or when search
+results seem incomplete or unexpected. If embedding coverage is below
+100%, run `pkb rebuild` to fix it."""
 
 
 _NO_VAULT_MSG = (
@@ -389,7 +413,8 @@ def _update_page(
             return {"error": f"File not found: {fp}"}
 
         has_body = bool(body)
-        has_metadata = any([tags, sources, related, source_url, sentiment, status])
+        has_metadata = (tags is not None or sources is not None or related is not None
+                        or source_url or sentiment or status)
 
         if has_body and section:
             # Section update
@@ -458,13 +483,13 @@ def _apply_frontmatter_updates(
     # Update updated_at
     lines = _set_fm_scalar(lines, "updated_at", date.today().isoformat())
 
-    # Append to list fields
-    if tags:
-        lines = _append_fm_list(lines, "tags", tags)
-    if sources:
-        lines = _append_fm_list(lines, "sources", [f'"[[{s}]]"' for s in sources])
-    if related:
-        lines = _append_fm_list(lines, "related", [f'"[[{r}]]"' for r in related])
+    # Replace list fields (None = don't touch, [] = clear, [...] = set)
+    if tags is not None:
+        lines = _replace_fm_list(lines, "tags", tags)
+    if sources is not None:
+        lines = _replace_fm_list(lines, "sources", [f'"[[{s}]]"' for s in sources])
+    if related is not None:
+        lines = _replace_fm_list(lines, "related", [f'"[[{r}]]"' for r in related])
 
     return "---\n" + "\n".join(lines) + "\n---\n" + rest
 
@@ -479,8 +504,8 @@ def _set_fm_scalar(lines: list[str], key: str, value: str) -> list[str]:
     return lines
 
 
-def _append_fm_list(lines: list[str], key: str, items: list[str]) -> list[str]:
-    """Append items to a YAML list field. Handles empty list `[]` syntax."""
+def _replace_fm_list(lines: list[str], key: str, items: list[str]) -> list[str]:
+    """Replace a YAML list field with new items. Empty list = clear."""
     # Find the key line
     key_idx = None
     for i, line in enumerate(lines):
@@ -490,30 +515,27 @@ def _append_fm_list(lines: list[str], key: str, items: list[str]) -> list[str]:
 
     if key_idx is None:
         # Add the field
-        lines.append(f"{key}:")
-        for item in items:
-            lines.append(f"  - {item}")
+        if items:
+            lines.append(f"{key}:")
+            for item in items:
+                lines.append(f"  - {item}")
+        else:
+            lines.append(f"{key}: []")
         return lines
 
-    # Check if it's an empty list: `key: []`
-    if lines[key_idx].strip().endswith("[]"):
+    # Remove existing list items
+    end_idx = key_idx + 1
+    while end_idx < len(lines) and lines[end_idx].startswith("  - "):
+        end_idx += 1
+    del lines[key_idx + 1:end_idx]
+
+    # Write new items
+    if items:
         lines[key_idx] = f"{key}:"
-
-    # Find the end of the existing list items
-    insert_at = key_idx + 1
-    while insert_at < len(lines) and lines[insert_at].startswith("  - "):
-        insert_at += 1
-
-    # Collect existing items to avoid duplicates
-    existing = set()
-    for j in range(key_idx + 1, insert_at):
-        existing.add(lines[j].strip().lstrip("- ").strip())
-
-    # Insert new items
-    for item in items:
-        if item.strip() not in existing:
-            lines.insert(insert_at, f"  - {item}")
-            insert_at += 1
+        for i, item in enumerate(items):
+            lines.insert(key_idx + 1 + i, f"  - {item}")
+    else:
+        lines[key_idx] = f"{key}: []"
 
     return lines
 

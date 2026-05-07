@@ -603,18 +603,55 @@ class TestKbSaveSectionUpdate:
 
 
 class TestKbSaveFrontmatterUpdate:
-    """kb_save frontmatter-only updates."""
+    """kb_save frontmatter-only updates (replace semantics)."""
 
-    def test_add_tags(self, mcp_sandbox):
+    def test_replace_tags(self, mcp_sandbox):
+        """tags=[...] replaces the entire tag list."""
         try:
             kb_save(title="FM Update Test", origin="note", body="Body.", tags=["original"])
             r = kb_save(id="fm-update-test", tags=["new-tag"])
             assert "error" not in r
             content = (config.WIKI_DIR / "fm-update-test.md").read_text()
             assert "- new-tag" in content
-            assert "- original" in content
+            assert "- original" not in content
         finally:
             _cleanup_added_page("fm-update-test")
+
+    def test_replace_tags_preserves_all(self, mcp_sandbox):
+        """Passing all desired tags keeps them all."""
+        try:
+            kb_save(title="FM Keep Tags", origin="note", body="Body.", tags=["a", "b"])
+            r = kb_save(id="fm-keep-tags", tags=["a", "b", "c"])
+            assert "error" not in r
+            content = (config.WIKI_DIR / "fm-keep-tags.md").read_text()
+            assert "- a" in content
+            assert "- b" in content
+            assert "- c" in content
+        finally:
+            _cleanup_added_page("fm-keep-tags")
+
+    def test_clear_tags(self, mcp_sandbox):
+        """tags=[] clears all tags."""
+        try:
+            kb_save(title="FM Clear Tags", origin="note", body="Body.", tags=["remove-me"])
+            r = kb_save(id="fm-clear-tags", tags=[])
+            assert "error" not in r
+            content = (config.WIKI_DIR / "fm-clear-tags.md").read_text()
+            assert "- remove-me" not in content
+            assert "tags: []" in content
+        finally:
+            _cleanup_added_page("fm-clear-tags")
+
+    def test_omit_tags_leaves_unchanged(self, mcp_sandbox):
+        """Not passing tags at all leaves them unchanged."""
+        try:
+            kb_save(title="FM Omit Tags", origin="note", body="Body.", tags=["keep-me"])
+            r = kb_save(id="fm-omit-tags", status="developing")
+            assert "error" not in r
+            content = (config.WIKI_DIR / "fm-omit-tags.md").read_text()
+            assert "- keep-me" in content
+        finally:
+            _cleanup_added_page("fm-omit-tags")
 
     def test_update_status(self, mcp_sandbox):
         try:
@@ -625,6 +662,19 @@ class TestKbSaveFrontmatterUpdate:
             assert "status: developing" in content
         finally:
             _cleanup_added_page("status-update-test")
+
+    def test_replace_related(self, mcp_sandbox):
+        """related=[...] replaces the related list."""
+        try:
+            kb_save(title="FM Related Test", origin="note", body="Body.",
+                    related=["test-concept-alpha"])
+            r = kb_save(id="fm-related-test", related=["test-concept-beta"])
+            assert "error" not in r
+            content = (config.WIKI_DIR / "fm-related-test.md").read_text()
+            assert "[[test-concept-beta]]" in content
+            assert "[[test-concept-alpha]]" not in content
+        finally:
+            _cleanup_added_page("fm-related-test")
 
 
 class TestKbStatus:
