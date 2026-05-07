@@ -1,8 +1,9 @@
-"""FastMCP server: kb_add, kb_search, kb_explore, kb_synthesize, kb_get, kb_list, kb_reindex, kb_status."""
+"""FastMCP server: kb_find, kb_save, kb_status."""
 
 import os
 import re
 import time
+from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -12,137 +13,68 @@ from . import config
 from .db import get_connection, init_schema
 from .embeddings import get_provider
 from .indexer import Indexer, parse_markdown, file_md5, slug_from_path
-from .models import NodeSummary, SearchResult, NodeDetail, ExploreResult, StatusResult
+from .models import NodeSummary, SearchResult, NodeDetail, StatusResult
 from .search import (
     hybrid_search, fts_search, get_node, get_node_summary,
-    list_nodes, get_status, explore, get_source_chain, get_derived_pages,
-    get_neighborhood,
+    list_nodes, get_status,
 )
 
 mcp = FastMCP("pkb", instructions="""\
-Personal knowledge base tools. These access the user's PERSONAL compiled \
-wiki — a curated collection of notes, ingested articles, papers, and \
-synthesis pages. NOT the public internet.
+Personal knowledge base tools. These access the user's PERSONAL wiki — \
+a curated collection of notes, articles, papers, and compiled pages. \
+NOT the public internet.
 
 Use these tools when the user asks about their personal notes, KB, wiki, \
 or vault. Trigger phrases: "in my KB", "in my notes", "check my vault", \
-"what do I know about", "explore:", "query:", "kb:". For general knowledge \
-questions, prefer web search or your own training data.
+"what do I know about", "query:", "kb:". For general knowledge questions, \
+prefer web search or your own training data.
 
-Start with kb_explore for topic overviews. Use kb_search for specific \
-queries. After any file write, always call kb_reindex. When compiling, \
-use kb_synthesize to get the synthesis prompt — it contains wikilink \
-candidates and section protection rules.""")
+Three tools: kb_find (read), kb_save (write), kb_status (health check).""")
 
 _KB_TOKEN = os.getenv("KB_MCP_TOKEN")
 
 # --- Tool description constants ---
 
-_SEARCH_DESC = """\
-Personal KB tool. Search the user's personal knowledge base using hybrid
-retrieval (FTS5 + vector + RRF).
+_FIND_DESC = """\
+Personal KB tool. Find and retrieve pages from the user's personal wiki.
 
-Use this when the user wants to find specific pages matching a query, or
-needs origin/sentiment filters. Returns ranked results with titles, origins,
-scores, and snippets from their curated collection.
-
-For general topic overviews ("kb: agent memory", "what do I know about X"),
-prefer kb_explore instead — it returns richer context (synthesis page,
-staleness, graph neighbors). Use kb_search when the user wants a ranked
-list of matching pages or when kb_explore didn't surface what they need.
+Modes (determined by parameters):
+- Search: kb_find(query="agent memory") — hybrid FTS5 + vector search.
+  Returns ranked results with scores and snippets. Use "hybrid" mode
+  (default) for best quality; "bm25" for exact keyword matching.
+- Get page: kb_find(id="agent-memory") — full page content + metadata +
+  graph edges (sources, sourced_by, related, wikilinks).
+- Browse: kb_find(origin="paper") or kb_find(tag="rag") — filtered listing
+  sorted by the chosen field.
 
 Results are ranked by Reciprocal Rank Fusion score. Only ordering matters —
-do not interpret raw score values as similarity percentages. Use "hybrid"
-mode (default) for best quality; "bm25" for exact keyword matching.
+do not interpret raw score values as similarity percentages.
 
 DO NOT use this for general knowledge questions — use web search instead.
-DO NOT use this for browsing — use kb_list instead.
-DO NOT use this if you already have a node ID — use kb_get instead."""
+DO NOT guess node IDs — search first to find valid IDs."""
 
-_EXPLORE_DESC = """\
-Personal KB tool. Explore a topic in the user's personal knowledge base.
-Returns the synthesis page (if one exists), staleness indicators,
-unincorporated source pages, adjacent topics in the graph, and suggested
-next actions.
+_SAVE_DESC = """\
+Personal KB tool. Create, update, or reindex pages in the user's personal
+wiki. Automatically reindexes after every write.
 
-This is the DEFAULT tool when the user asks about their KB. Use it for
-trigger phrases like "kb:", "in my KB", "what do I know about", "in my
-notes about", "explore:", "check my vault". It gives a structured overview
-of everything the KB knows about a topic.
+Modes (determined by parameters):
+- Create new page: kb_save(title="...", origin="note", body="...")
+- Update metadata: kb_save(id="...", tags=["..."], related=["..."])
+- Update a section: kb_save(id="...", section="Summary", body="new content")
+- Replace body: kb_save(id="...", body="new full body")
+- Reindex after external edit: kb_save(id="...")
 
-Prefer this over kb_search when the user wants a topic overview. Use
-kb_search instead only when the user wants to find specific pages matching
-a precise query or needs origin/sentiment filters.
+The `origin` field specifies provenance: webpage, paper, conversation,
+note, book, transcript, meta.
 
-DO NOT use this for general knowledge questions — use web search instead.
-DO NOT use this to retrieve a specific page — use kb_get instead."""
+Use `sources` for pages this was built FROM (creates source edges).
+Use `related` for pages this is RELEVANT TO (creates related edges).
+Wikilinks are pathless: use "agent-memory" not "concepts/agent-memory".
 
-_GET_DESC = """\
-Personal KB tool. Retrieve full page content, metadata, and edges (sources,
-sourced_by, related) from the user's personal wiki.
+On create, returns `suggested_related` (semantically similar pages) and
+`suggested_tags` (common tags from similar pages) to help link new content.
 
-Use this after kb_search or kb_explore returns a node ID the user wants to
-read in full. Returns the complete markdown body plus frontmatter fields and
-graph edges.
-
-DO NOT guess node IDs — search or explore first to find valid IDs."""
-
-_LIST_DESC = """\
-Personal KB tool. Browse and filter pages in the user's personal wiki by
-origin, tag, or status. Returns summaries sorted by the chosen field.
-
-Use this when the user wants to see what's in their KB — inventorying
-pages, filtering by topic area, or browsing recent additions.
-
-DO NOT use this for general knowledge questions — use web search instead.
-DO NOT use this for semantic search — use kb_search instead.
-DO NOT use this if you already have a node ID — use kb_get instead."""
-
-_ADD_DESC = """\
-Personal KB tool. Add a new page to the user's personal wiki. Writes a
-markdown file with frontmatter and indexes it in SQLite immediately. The
-page is searchable right away.
-
-The `origin` parameter specifies provenance — what kind of content this is:
-webpage, paper, conversation, note, book, transcript, meta.
-
-Use the `related` parameter to declare connections to existing pages (e.g.,
-related=["agent-memory"]). This creates graph edges that surface during
-kb_explore. Use `sources` for pages this was built FROM; use `related` for
-pages this is RELEVANT TO. Wikilinks are pathless: use "agent-memory" not
-"concepts/agent-memory".
-
-Does NOT trigger compilation — the caller decides when to compile.
-Does NOT fetch URLs — pass the content directly in the body parameter.
-Returns the indexed node summary on success, plus `suggested_related` —
-a list of existing pages that are semantically similar. The user can
-confirm which suggestions to link."""
-
-_SYNTHESIZE_DESC = """\
-Personal KB tool. Assemble a synthesis/compilation prompt for a page in the
-user's personal wiki. Returns a structured string containing the existing
-## Synthesis section content, source pages to incorporate, available
-wikilink slugs, and rewrite rules.
-
-Section-protected: only the ## Synthesis section is passed to you for
-rewriting. All other sections (## Notes, user content) are preserved
-untouched. After writing the updated file, you MUST call kb_reindex.
-
-This tool does NOT call an LLM — it returns context for the calling LLM.
-
-DO NOT call this without reading the result — it contains critical rewrite
-rules including the reindex requirement and wikilink instructions."""
-
-_REINDEX_DESC = """\
-Personal KB tool. Re-index a single file after writing or editing it in the
-user's wiki. Updates FTS5, embeddings, and graph edges in the SQLite database.
-
-You MUST call this after every file write or edit during compilation. Without
-this, search results will be stale and graph edges will be wrong.
-
-Accepts either file_path (relative to vault root or absolute) or node_id.
-Do NOT run multiple kb_reindex calls in parallel — execute them sequentially
-to avoid SQLite database locking errors."""
+Does NOT fetch URLs — pass content directly in the body parameter."""
 
 _STATUS_DESC = """\
 Personal KB tool. Health check for the user's personal knowledge base index.
@@ -190,76 +122,129 @@ def _get_provider(conn):
     return get_provider(provider_name, conn=conn)
 
 
-@mcp.tool(description=_SEARCH_DESC)
-def kb_search(
-    query: str,
-    limit: int = 10,
+def _reindex_file(conn, fp: Path) -> str | None:
+    """Reindex a single file. Returns node_id or None."""
+    # Flush detection: wait for write to complete
+    for _ in range(5):
+        mtime1, size1 = fp.stat().st_mtime, fp.stat().st_size
+        time.sleep(0.05)
+        mtime2, size2 = fp.stat().st_mtime, fp.stat().st_size
+        if mtime1 == mtime2 and size1 == size2 and size1 > 0:
+            break
+
+    provider = _get_provider(conn)
+    indexer = Indexer(conn, embedding_provider=provider)
+    return indexer.index_single(fp)
+
+
+def _resolve_file_path(conn, node_id: str) -> Path | None:
+    """Resolve a node_id to its file path."""
+    row = conn.execute("SELECT file_path FROM nodes WHERE id = ?", (node_id,)).fetchone()
+    if not row:
+        return None
+    fp = Path(row["file_path"])
+    if not fp.is_absolute():
+        fp = config.VAULT_ROOT / fp
+    return fp
+
+
+# --- MCP Tools ---
+
+@mcp.tool(description=_FIND_DESC)
+def kb_find(
+    query: str = "",
+    id: str = "",
     origin: str | None = None,
+    tag: str | None = None,
+    status: str | None = None,
     sentiment: str | None = None,
     mode: str = "hybrid",
-) -> list[dict]:
-    """Hybrid FTS5 + vector search with Reciprocal Rank Fusion."""
+    sort: str = "updated_at",
+    limit: int = 10,
+) -> dict | list[dict] | None:
+    """Find and retrieve pages from the personal wiki."""
     conn = _get_conn()
-    filters = {}
-    if origin:
-        filters["origin"] = origin
-    if sentiment:
-        filters["sentiment"] = sentiment
-
     try:
-        if mode == "bm25":
-            results = fts_search(conn, query, limit=limit, filters=filters)
-        else:
-            provider = _get_provider(conn)
-            results = hybrid_search(conn, query, limit=limit, filters=filters, embedding_provider=provider)
-        return [r.model_dump() for r in results]
+        # Get by ID
+        if id:
+            detail = get_node(conn, id)
+            return detail.model_dump() if detail else None
+
+        # Browse by filters (when no query given)
+        if not query and (origin or tag or status):
+            nodes = list_nodes(conn, origin_filter=origin, tag_filter=tag,
+                              status_filter=status, sort=sort, limit=limit)
+            return [n.model_dump() for n in nodes]
+
+        # Search by query (handles empty string gracefully)
+        if query or not (origin or tag or status):
+            filters = {}
+            if origin:
+                filters["origin"] = origin
+            if sentiment:
+                filters["sentiment"] = sentiment
+
+            if mode == "bm25":
+                results = fts_search(conn, query, limit=limit, filters=filters)
+            else:
+                provider = _get_provider(conn)
+                results = hybrid_search(conn, query, limit=limit, filters=filters, embedding_provider=provider)
+            return [r.model_dump() for r in results]
+
+        return {"error": "Provide query, id, or filters"}
     finally:
         conn.close()
 
 
-@mcp.tool(description=_EXPLORE_DESC)
-def kb_explore(topic: str) -> dict:
-    """Interactive exploration of a topic."""
+@mcp.tool(description=_SAVE_DESC)
+def kb_save(
+    title: str = "",
+    id: str = "",
+    origin: str = "",
+    body: str = "",
+    section: str = "",
+    tags: list[str] | None = None,
+    sources: list[str] | None = None,
+    related: list[str] | None = None,
+    source_url: str = "",
+    sentiment: str = "",
+    status: str = "",
+    ingested_via: str = "manual",
+) -> dict:
+    """Create, update, or reindex pages in the personal wiki."""
+    # --- Create new page ---
+    if not id and title:
+        return _create_page(
+            title=title, origin=origin, body=body, source_url=source_url,
+            tags=tags, sources=sources, related=related,
+            sentiment=sentiment, ingested_via=ingested_via,
+        )
+
+    # --- Update or reindex existing page ---
+    if id:
+        return _update_page(
+            node_id=id, body=body, section=section,
+            tags=tags, sources=sources, related=related,
+            source_url=source_url, sentiment=sentiment, status=status,
+        )
+
+    return {"error": "Provide 'id' to update, or 'title' + 'origin' + 'body' to create."}
+
+
+@mcp.tool(description=_STATUS_DESC)
+def kb_status() -> dict:
+    """Index health check."""
     conn = _get_conn()
     try:
-        provider = _get_provider(conn)
-        result = explore(conn, topic, embedding_provider=provider)
+        result = get_status(conn)
         return result.model_dump()
     finally:
         conn.close()
 
 
-@mcp.tool(description=_GET_DESC)
-def kb_get(node_id: str) -> dict | None:
-    """Get full page content + metadata + edges."""
-    conn = _get_conn()
-    try:
-        detail = get_node(conn, node_id)
-        return detail.model_dump() if detail else None
-    finally:
-        conn.close()
+# --- Internal helpers ---
 
-
-@mcp.tool(description=_LIST_DESC)
-def kb_list(
-    origin: str | None = None,
-    tag: str | None = None,
-    status: str | None = None,
-    sort: str = "updated_at",
-    limit: int = 50,
-) -> list[dict]:
-    """Filtered/sorted listing of nodes."""
-    conn = _get_conn()
-    try:
-        nodes = list_nodes(conn, origin_filter=origin, tag_filter=tag,
-                          status_filter=status, sort=sort, limit=limit)
-        return [n.model_dump() for n in nodes]
-    finally:
-        conn.close()
-
-
-@mcp.tool(description=_ADD_DESC)
-def kb_add(
+def _create_page(
     title: str,
     origin: str,
     body: str,
@@ -270,18 +255,19 @@ def kb_add(
     sentiment: str = "",
     ingested_via: str = "manual",
 ) -> dict:
-    """Add a new page to the vault."""
+    """Create a new wiki page, index it, and return summary with suggestions."""
     tags = tags or []
     sources = sources or []
     related = related or []
 
-    # Derive file path — flat structure, no subdirectories
+    if not origin:
+        return {"error": "origin is required for new pages"}
+
     slug = _slugify(title)
     file_path = config.WIKI_DIR / f"{slug}.md"
 
-    # Check for conflicts
     if file_path.exists():
-        return {"error": f"File already exists: {file_path.relative_to(config.VAULT_ROOT)}. Use kb_get + manual edit."}
+        return {"error": f"File already exists: {file_path.relative_to(config.VAULT_ROOT)}. Use kb_save(id=\"{slug}\", ...) to update."}
 
     # Check alias conflicts
     from .markdown import normalize_alias
@@ -328,7 +314,7 @@ def kb_add(
     fm_lines.append(f"updated_at: {today}")
     fm_lines.append("---")
 
-    full_content = "\n".join(fm_lines) + f"\n\n# {title}\n\n## Notes\n\n" + body
+    full_content = "\n".join(fm_lines) + f"\n\n# {title}\n\n" + body
 
     # Write file
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -345,20 +331,36 @@ def kb_add(
             summary = get_node_summary(conn, node_id)
             result = summary.model_dump() if summary else {"id": node_id, "file_path": str(file_path)}
 
-            # Auto-suggest related pages (exclude self, meta, already-declared)
+            # Auto-suggest related pages
             meta_pages = {"index", "log", "hot"}
             declared_set = set(related) | set(sources)
             try:
                 suggestions = hybrid_search(conn, body[:2000], limit=5, embedding_provider=provider)
-                result["suggested_related"] = [
-                    {"id": s.node_id, "title": s.title}
-                    for s in suggestions
+                similar_pages = [
+                    s for s in suggestions
                     if s.node_id != node_id
                     and s.node_id not in meta_pages
                     and s.node_id not in declared_set
                 ][:3]
+                result["suggested_related"] = [
+                    {"id": s.node_id, "title": s.title}
+                    for s in similar_pages
+                ]
+
+                # Auto-suggest tags from similar pages
+                tag_counter: Counter = Counter()
+                for s in similar_pages:
+                    page_tags = conn.execute(
+                        "SELECT tag FROM tags WHERE node_id = ?", (s.node_id,)
+                    ).fetchall()
+                    for row in page_tags:
+                        if row["tag"] not in tags:
+                            tag_counter[row["tag"]] += 1
+                result["suggested_tags"] = [t for t, _ in tag_counter.most_common(5)]
+
             except Exception:
                 result["suggested_related"] = []
+                result["suggested_tags"] = []
 
             return result
         return {"error": "Indexing failed"}
@@ -366,135 +368,154 @@ def kb_add(
         conn.close()
 
 
-@mcp.tool(description=_SYNTHESIZE_DESC)
-def kb_synthesize(node_id: str, source_ids: list[str] | None = None) -> str:
-    """Assemble a synthesis prompt for rewriting a page."""
-    source_ids = source_ids or []
+def _update_page(
+    node_id: str,
+    body: str = "",
+    section: str = "",
+    tags: list[str] | None = None,
+    sources: list[str] | None = None,
+    related: list[str] | None = None,
+    source_url: str = "",
+    sentiment: str = "",
+    status: str = "",
+) -> dict:
+    """Update an existing page (section, body, frontmatter, or reindex-only)."""
     conn = _get_conn()
     try:
-        provider = _get_provider(conn)
-        existing = get_node(conn, node_id)
-
-        source_pages = []
-        for sid in source_ids:
-            page = get_node(conn, sid)
-            if page:
-                source_pages.append(page)
-
-        existing_title = existing.title if existing else node_id
-
-        # Extract only the ## Synthesis section for section-protected compilation
-        from .markdown import extract_section
-        if existing:
-            existing_synthesis = extract_section(existing.body, "Synthesis")
-        else:
-            existing_synthesis = ""
-
-        sources_text = ""
-        for sp in source_pages:
-            sources_text += f"\n\n### [[{sp.id}]] — {sp.title}\n"
-            sources_text += f"Origin: {sp.origin} | Updated: {sp.updated_at}\n"
-            sources_text += sp.body[:3000]
-
-        # Scoped wikilink candidates: semantic search + graph neighbors
-        candidate_ids = set()
-        try:
-            search_hits = hybrid_search(conn, existing_title, limit=30, embedding_provider=provider)
-            candidate_ids |= {h.node_id for h in search_hits}
-        except Exception:
-            pass
-        neighbors = get_neighborhood(conn, node_id, radius=1)
-        candidate_ids |= {n.id for n in neighbors}
-        candidate_ids.discard(node_id)
-
-        if candidate_ids:
-            placeholders = ",".join("?" * len(candidate_ids))
-            available = conn.execute(
-                f"SELECT id, title FROM nodes WHERE id IN ({placeholders}) AND origin != 'meta'",
-                list(candidate_ids),
-            ).fetchall()
-            page_list = "\n".join(f"- [[{r['id']}]] ({r['title']})" for r in available)
-        else:
-            page_list = "(no linkable pages found)"
-
-        return f"""## Synthesis task
-
-Write or update the ## Synthesis section for [[{node_id}]] ({existing_title}).
-
-### Current synthesis section
-{existing_synthesis if existing_synthesis else "(no existing synthesis — create from scratch)"}
-
-### Sources to incorporate
-{sources_text if sources_text else "(no new sources specified)"}
-
-### Rules
-- Return ONLY the content for the ## Synthesis section. Do NOT include the ## Synthesis heading itself.
-- Write a coherent synthesis that incorporates all sources. Do not just list them.
-- Update the `updated_at:` frontmatter field to today ({date.today().isoformat()}).
-- Add each new source to the `sources: []` list in frontmatter.
-- If any new source contradicts existing content, add a > [!contradiction] callout.
-- Preserve the frontmatter schema (flat YAML, all required fields).
-- When referring to concepts, entities, or topics that exist in the wiki, use [[slug]] wikilink notation inline in the prose. Only link to pages in this list:
-{page_list}
-- After writing the updated file to disk, you MUST immediately call kb_reindex(node_id="{node_id}") to update the search index. Do not proceed with other operations until reindexing completes.
-- Use the replace_or_insert_section helper or manually splice the synthesis content into the page, preserving all other sections (## Notes, etc.) untouched.
-"""
-    finally:
-        conn.close()
-
-
-@mcp.tool(description=_REINDEX_DESC)
-def kb_reindex(file_path: str = "", node_id: str = "") -> dict:
-    """Re-index a single file after writing or editing it."""
-    conn = _get_conn()
-    try:
-        if node_id and not file_path:
-            row = conn.execute("SELECT file_path FROM nodes WHERE id = ?", (node_id,)).fetchone()
-            if row:
-                file_path = row["file_path"]
-            else:
-                return {"error": f"Node not found: {node_id}"}
-
-        if not file_path:
-            return {"error": "Provide file_path or node_id"}
-
-        # Resolve to absolute path
-        fp = Path(file_path)
-        if not fp.is_absolute():
-            fp = config.VAULT_ROOT / fp
-
+        fp = _resolve_file_path(conn, node_id)
+        if fp is None:
+            return {"error": f"Node not found: {node_id}"}
         if not fp.exists():
             return {"error": f"File not found: {fp}"}
 
-        # Flush detection: wait for write to complete
-        for _ in range(5):
-            mtime1, size1 = fp.stat().st_mtime, fp.stat().st_size
-            time.sleep(0.05)
-            mtime2, size2 = fp.stat().st_mtime, fp.stat().st_size
-            if mtime1 == mtime2 and size1 == size2 and size1 > 0:
-                break
+        has_body = bool(body)
+        has_metadata = any([tags, sources, related, source_url, sentiment, status])
 
-        provider = _get_provider(conn)
-        indexer = Indexer(conn, embedding_provider=provider)
-        result_id = indexer.index_single(fp)
+        if has_body and section:
+            # Section update
+            from .markdown import replace_or_insert_section
+            content = fp.read_text(encoding="utf-8")
+            content = replace_or_insert_section(content, section, body)
+            fp.write_text(content, encoding="utf-8")
 
+        elif has_body:
+            # Full body replacement (preserve frontmatter)
+            content = fp.read_text(encoding="utf-8")
+            fm, _ = parse_markdown(fp)
+            # Reconstruct: keep everything up to end of frontmatter, replace body
+            fm_match = re.match(r"^---\n.*?\n---\n", content, re.DOTALL)
+            if fm_match:
+                fm_text = fm_match.group(0)
+            else:
+                fm_text = ""
+            fp.write_text(fm_text + "\n" + body, encoding="utf-8")
+
+        elif has_metadata:
+            # Frontmatter-only update
+            content = fp.read_text(encoding="utf-8")
+            content = _apply_frontmatter_updates(
+                content, tags=tags, sources=sources, related=related,
+                source_url=source_url, sentiment=sentiment, status=status,
+            )
+            fp.write_text(content, encoding="utf-8")
+
+        # Reindex (always — covers reindex-only mode too)
+        result_id = _reindex_file(conn, fp)
         if result_id:
             summary = get_node_summary(conn, result_id)
             return summary.model_dump() if summary else {"id": result_id}
-        return {"error": "Indexing failed"}
+        return {"error": "Reindexing failed"}
     finally:
         conn.close()
 
 
-@mcp.tool(description=_STATUS_DESC)
-def kb_status() -> dict:
-    """Index health check."""
-    conn = _get_conn()
-    try:
-        status = get_status(conn)
-        return status.model_dump()
-    finally:
-        conn.close()
+def _apply_frontmatter_updates(
+    content: str,
+    tags: list[str] | None = None,
+    sources: list[str] | None = None,
+    related: list[str] | None = None,
+    source_url: str = "",
+    sentiment: str = "",
+    status: str = "",
+) -> str:
+    """Update frontmatter fields in a markdown file's content string."""
+    fm_match = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)
+    if not fm_match:
+        return content
+
+    fm_text = fm_match.group(1)
+    rest = content[fm_match.end():]
+    lines = fm_text.split("\n")
+
+    # Update scalar fields
+    if status:
+        lines = _set_fm_scalar(lines, "status", status)
+    if sentiment:
+        lines = _set_fm_scalar(lines, "sentiment", sentiment)
+    if source_url:
+        lines = _set_fm_scalar(lines, "url", f'"{source_url}"')
+
+    # Update updated_at
+    lines = _set_fm_scalar(lines, "updated_at", date.today().isoformat())
+
+    # Append to list fields
+    if tags:
+        lines = _append_fm_list(lines, "tags", tags)
+    if sources:
+        lines = _append_fm_list(lines, "sources", [f'"[[{s}]]"' for s in sources])
+    if related:
+        lines = _append_fm_list(lines, "related", [f'"[[{r}]]"' for r in related])
+
+    return "---\n" + "\n".join(lines) + "\n---\n" + rest
+
+
+def _set_fm_scalar(lines: list[str], key: str, value: str) -> list[str]:
+    """Set a scalar frontmatter field, adding it if missing."""
+    for i, line in enumerate(lines):
+        if line.startswith(f"{key}:"):
+            lines[i] = f"{key}: {value}"
+            return lines
+    lines.append(f"{key}: {value}")
+    return lines
+
+
+def _append_fm_list(lines: list[str], key: str, items: list[str]) -> list[str]:
+    """Append items to a YAML list field. Handles empty list `[]` syntax."""
+    # Find the key line
+    key_idx = None
+    for i, line in enumerate(lines):
+        if line.startswith(f"{key}:"):
+            key_idx = i
+            break
+
+    if key_idx is None:
+        # Add the field
+        lines.append(f"{key}:")
+        for item in items:
+            lines.append(f"  - {item}")
+        return lines
+
+    # Check if it's an empty list: `key: []`
+    if lines[key_idx].strip().endswith("[]"):
+        lines[key_idx] = f"{key}:"
+
+    # Find the end of the existing list items
+    insert_at = key_idx + 1
+    while insert_at < len(lines) and lines[insert_at].startswith("  - "):
+        insert_at += 1
+
+    # Collect existing items to avoid duplicates
+    existing = set()
+    for j in range(key_idx + 1, insert_at):
+        existing.add(lines[j].strip().lstrip("- ").strip())
+
+    # Insert new items
+    for item in items:
+        if item.strip() not in existing:
+            lines.insert(insert_at, f"  - {item}")
+            insert_at += 1
+
+    return lines
 
 
 def _slugify(title: str) -> str:

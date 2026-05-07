@@ -543,7 +543,7 @@ def explore(
     search_hits = hybrid_search(conn, topic, limit=10, embedding_provider=embedding_provider)
     result.search_results = search_hits
 
-    # Find the best synthesis candidate by graph structure, not origin type
+    # Find the best hub candidate by graph structure (outgoing source edges)
     synthesis_node = None
     best_score = -1.0
     for hit in search_hits:
@@ -551,22 +551,17 @@ def explore(
             "SELECT COUNT(*) FROM edges WHERE from_id = ? AND edge_type = 'source'",
             (hit.node_id,),
         ).fetchone()[0]
-        body_row = conn.execute("SELECT body FROM nodes WHERE id = ?", (hit.node_id,)).fetchone()
-        body_text = body_row["body"] if body_row else ""
 
         score = hit.score
         if src_count > 0:
             score += min(src_count, 5) * 0.05
-        if "## Synthesis" in body_text:
-            score += 0.20
 
-        if score > best_score and (src_count > 0 or "## Synthesis" in body_text):
+        if score > best_score and src_count > 0:
             best_score = score
             synthesis_node = get_node_summary(conn, hit.node_id)
 
     if synthesis_node:
-        result.synthesis = synthesis_node
-        result.synthesis_updated = synthesis_node.updated_at
+        result.hub = synthesis_node
 
         # Days since update
         try:
@@ -637,10 +632,10 @@ def explore(
             adj = result.adjacent_topics[0]
             result.suggested_actions.append(f"Explore adjacent topic: [[{adj.id}]]")
     else:
-        # No synthesis page found
+        # No hub page found
         if search_hits:
             result.suggested_actions.append(
-                f"No synthesis page for '{topic}'. Create one from {len(search_hits)} related pages?"
+                f"No hub page for '{topic}'. Create one from {len(search_hits)} related pages?"
             )
         else:
             result.suggested_actions.append(

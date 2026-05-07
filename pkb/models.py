@@ -50,16 +50,15 @@ class NodeDetail(BaseModel):
 
 
 class ExploreResult(BaseModel):
-    """Structured exploration state for interactive retrieval."""
+    """Structured exploration state (System 2 — reflection-time use)."""
     topic: str
 
-    # Synthesis page for this topic (if one exists)
-    synthesis: NodeSummary | None = None
-    synthesis_updated: str | None = None
+    # Hub page for this topic (page with outgoing source edges)
+    hub: NodeSummary | None = None
 
     # Staleness assessment
     is_stale: bool = False
-    stale_sources: list[NodeSummary] = []        # existing sources updated after synthesis
+    stale_sources: list[NodeSummary] = []        # existing sources updated after hub
     unincorporated_sources: list[NodeSummary] = []  # new related pages not in sources
     days_since_update: int | None = None
 
@@ -68,7 +67,7 @@ class ExploreResult(BaseModel):
     derived_pages: list[NodeSummary] = []
     adjacent_topics: list[NodeSummary] = []
 
-    # Search context (when no exact synthesis exists)
+    # Search context (when no exact hub exists)
     search_results: list[SearchResult] = []
 
     # Suggested next actions

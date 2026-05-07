@@ -98,10 +98,9 @@ class TestExplore:
         """Exploring 'AI coding agents' should find the concept page."""
         result = explore(conn, "AI coding agents")
         assert result.topic == "AI coding agents"
-        # Should find a synthesis page
-        if result.synthesis:
-            assert result.synthesis.origin in ("note", "webpage", "paper", "conversation", "book", "transcript", "meta")
-            assert result.synthesis_updated is not None
+        # Should find a hub page
+        if result.hub:
+            assert result.hub.origin in ("note", "webpage", "paper", "conversation", "book", "transcript", "meta")
 
     def test_explore_returns_search_results(self, conn):
         """Explore should always include search results."""
@@ -120,9 +119,9 @@ class TestExplore:
         assert len(result.suggested_actions) > 0
 
     def test_explore_adjacent_topics(self, conn):
-        """If a synthesis exists, adjacent topics should be populated."""
+        """If a hub exists, adjacent topics should be populated."""
         result = explore(conn, "AI coding agents")
-        if result.synthesis:
+        if result.hub:
             # Adjacent topics come from the neighborhood
             # May be empty if the graph is small, but the field should exist
             assert isinstance(result.adjacent_topics, list)

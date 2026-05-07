@@ -198,3 +198,202 @@ class TestFilteredSearch:
             # Should primarily return the uncomfortable-truths source
             assert any("uncomfortable-truths" in r.path for r in results), \
                 f"Sentiment filter didn't surface critical source: {[r.path for r in results]}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Explore function tests (System 2 infrastructure)
+# ═══════════════════════════════════════════════════════════════════
+
+import os
+import textwrap
+from pkb import config
+from pkb.db import get_connection, init_schema
+from pkb.embeddings import get_provider
+from pkb.indexer import Indexer
+from pkb.search import explore
+
+
+@pytest.fixture(scope="module")
+def explore_sandbox(tmp_path_factory):
+    """Sandbox with test data for explore() function tests."""
+    tmp = tmp_path_factory.mktemp("explore_sandbox")
+    wiki_dir = tmp / "wiki"
+    wiki_dir.mkdir()
+
+    (wiki_dir / "test-concept-alpha.md").write_text(textwrap.dedent("""\
+    ---
+    origin: note
+    title: "Test Concept Alpha"
+    created_at: 2026-01-01
+    updated_at: 2026-01-15
+    status: developing
+    tags: [ai, memory]
+    sources:
+      - "[[test-paper-alpha]]"
+    related:
+      - "[[test-concept-beta]]"
+    ---
+
+    # Test Concept Alpha
+
+    This is a test concept about AI memory systems.
+    """))
+
+    (wiki_dir / "test-paper-alpha.md").write_text(textwrap.dedent("""\
+    ---
+    origin: webpage
+    title: "Test Paper Alpha"
+    created_at: 2026-01-01
+    updated_at: 2026-04-01
+    status: developing
+    tags: [ai, memory]
+    related: []
+    ---
+
+    # Test Paper Alpha
+
+    An enthusiastic paper about agent memory systems.
+    """))
+
+    (wiki_dir / "test-concept-beta.md").write_text(textwrap.dedent("""\
+    ---
+    origin: note
+    title: "Test Concept Beta"
+    created_at: 2026-02-01
+    updated_at: 2026-03-01
+    status: seed
+    tags: [ai, context]
+    sources:
+      - "[[test-paper-beta]]"
+    related:
+      - "[[test-concept-alpha]]"
+    ---
+
+    # Test Concept Beta
+
+    This is about LLM context scaling.
+    """))
+
+    (wiki_dir / "test-paper-beta.md").write_text(textwrap.dedent("""\
+    ---
+    origin: webpage
+    title: "Test Paper Beta"
+    created_at: 2026-02-01
+    updated_at: 2026-02-15
+    status: developing
+    tags: [ai]
+    related: []
+    ---
+
+    # Test Paper Beta
+
+    A critical analysis of LLM context window limitations.
+    """))
+
+    orig = {
+        "DB_PATH": config.DB_PATH,
+        "WIKI_DIR": config.WIKI_DIR,
+        "VAULT_ROOT": config.VAULT_ROOT,
+    }
+    orig_embed = os.environ.get("KB_EMBEDDING_PROVIDER")
+
+    config.DB_PATH = tmp / "test.db"
+    config.WIKI_DIR = wiki_dir
+    config.VAULT_ROOT = tmp
+    os.environ["KB_EMBEDDING_PROVIDER"] = "noop"
+
+    conn = get_connection()
+    init_schema(conn)
+    provider = get_provider("noop")
+    indexer = Indexer(conn, wiki_dir=wiki_dir, embedding_provider=provider)
+    indexer.rebuild(force=True)
+    conn.close()
+
+    yield tmp
+
+    config.DB_PATH = orig["DB_PATH"]
+    config.WIKI_DIR = orig["WIKI_DIR"]
+    config.VAULT_ROOT = orig["VAULT_ROOT"]
+    if orig_embed is not None:
+        os.environ["KB_EMBEDDING_PROVIDER"] = orig_embed
+    elif "KB_EMBEDDING_PROVIDER" in os.environ:
+        del os.environ["KB_EMBEDDING_PROVIDER"]
+
+
+class TestExplore:
+    """Tests for explore() function — System 2 infrastructure."""
+
+    def test_returns_explore_result(self, explore_sandbox):
+        conn = get_connection()
+        try:
+            provider = get_provider("noop")
+            result = explore(conn, "memory systems", embedding_provider=provider)
+            assert result.topic == "memory systems"
+        finally:
+            conn.close()
+
+    def test_has_all_fields(self, explore_sandbox):
+        conn = get_connection()
+        try:
+            provider = get_provider("noop")
+            result = explore(conn, "memory", embedding_provider=provider)
+            d = result.model_dump()
+            for key in ("topic", "hub", "is_stale", "stale_sources",
+                        "unincorporated_sources", "suggested_actions",
+                        "search_results", "adjacent_topics"):
+                assert key in d, f"Missing key: {key}"
+        finally:
+            conn.close()
+
+    def test_finds_hub_page(self, explore_sandbox):
+        conn = get_connection()
+        try:
+            provider = get_provider("noop")
+            result = explore(conn, "AI memory systems", embedding_provider=provider)
+            if result.hub:
+                assert result.hub.id is not None
+                assert result.hub.title is not None
+        finally:
+            conn.close()
+
+    def test_unknown_topic_gives_suggestions(self, explore_sandbox):
+        conn = get_connection()
+        try:
+            provider = get_provider("noop")
+            result = explore(conn, "underwater basket weaving", embedding_provider=provider)
+            assert len(result.suggested_actions) > 0
+        finally:
+            conn.close()
+
+    def test_search_results_included(self, explore_sandbox):
+        conn = get_connection()
+        try:
+            provider = get_provider("noop")
+            result = explore(conn, "memory", embedding_provider=provider)
+            assert isinstance(result.search_results, list)
+        finally:
+            conn.close()
+
+    def test_adjacent_topics_are_summaries(self, explore_sandbox):
+        conn = get_connection()
+        try:
+            provider = get_provider("noop")
+            result = explore(conn, "AI memory systems", embedding_provider=provider)
+            for adj in result.adjacent_topics:
+                assert adj.id is not None
+                assert adj.title is not None
+        finally:
+            conn.close()
+
+    def test_staleness_detected(self, explore_sandbox):
+        """concept-alpha (updated 2026-01-15) sources paper-alpha (updated 2026-04-01) → stale."""
+        conn = get_connection()
+        try:
+            provider = get_provider("noop")
+            result = explore(conn, "AI memory systems agent", embedding_provider=provider)
+            if result.hub and result.hub.id == "test-concept-alpha":
+                assert result.is_stale is True
+                stale_ids = [s.id for s in result.stale_sources]
+                assert "test-paper-alpha" in stale_ids
+        finally:
+            conn.close()

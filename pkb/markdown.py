@@ -1,4 +1,4 @@
-"""Markdown section extraction and splicing for section-protected compilation."""
+"""Markdown section extraction and splicing."""
 
 import re
 
@@ -20,12 +20,12 @@ def replace_or_insert_section(
     md: str,
     heading: str,
     content: str,
-    before: str = "Notes",
+    before: str = "",
 ) -> str:
     """Replace ## heading content, or insert before ## before_heading if absent.
 
     If neither the target section nor the before section exist,
-    appends at the end of the document.
+    appends after the title heading (or at end of document).
 
     The content should NOT include the ## heading itself — it will be added.
     If content accidentally starts with the heading, it's stripped.
@@ -43,11 +43,12 @@ def replace_or_insert_section(
     if re.search(pattern, md, re.MULTILINE | re.DOTALL):
         return re.sub(pattern, section_block, md, count=1, flags=re.MULTILINE | re.DOTALL)
 
-    # Insert before the target section
-    before_pattern = rf"^## {re.escape(before)}\s*\n"
-    m = re.search(before_pattern, md, re.MULTILINE)
-    if m:
-        return md[:m.start()] + section_block + md[m.start():]
+    # Insert before the target section (if specified)
+    if before:
+        before_pattern = rf"^## {re.escape(before)}\s*\n"
+        m = re.search(before_pattern, md, re.MULTILINE)
+        if m:
+            return md[:m.start()] + section_block + md[m.start():]
 
     # Fallback: append after the title (first # heading + its paragraph)
     title_pattern = r"^# .+\n\n?"
