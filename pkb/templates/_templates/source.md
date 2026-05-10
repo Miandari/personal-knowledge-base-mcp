@@ -1,17 +1,14 @@
 ---
-type: source
+origin: webpage
 title: "<% tp.file.title %>"
-source_type: article
 author: ""
-date_published: <% tp.date.now("YYYY-MM-DD") %>
 url: ""
-confidence: medium
-key_claims:
-  - ""
-created: <% tp.date.now("YYYY-MM-DD") %>
-updated: <% tp.date.now("YYYY-MM-DD") %>
+sentiment:
+ingested_via: manual
+created_at: <% tp.date.now("YYYY-MM-DD") %>
+updated_at: <% tp.date.now("YYYY-MM-DD") %>
 tags:
-  - source
+  -
 status: seed
 related: []
 sources: []
@@ -34,6 +31,3 @@ sources: []
 ## Concepts Introduced
 
 - [[]] —
-
-## Notes
-

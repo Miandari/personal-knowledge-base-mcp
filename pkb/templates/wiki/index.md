@@ -10,4 +10,4 @@ updated_at: 2026-01-01
 
 # Wiki index
 
-Your personal knowledge base. Add pages with `kb_add`, explore with `kb_explore`.
+Your personal knowledge base. Search with `kb_find`, save with `kb_save`.

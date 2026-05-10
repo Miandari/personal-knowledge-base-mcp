@@ -4,11 +4,19 @@ Personal knowledge base powered by pkb-mcp. See the [pkb-mcp README](https://git
 
 ## Core rules
 
-1. **Retrieval**: use `kb_explore` first, then `kb_search`. Never grep wiki/ for search — use MCP tools.
-2. **Compilation is demand-driven.** Ingestion adds pages. Do NOT auto-rewrite pages — `kb_explore` detects staleness and the user decides when to compile.
-3. **Preserve Obsidian compatibility**: wikilinks, flat YAML frontmatter.
-4. **Always reindex after writes.** After every Edit/Write to a wiki/ file, call `kb_reindex`.
-5. **Sequential reindex**: never run `kb_reindex` calls in parallel — SQLite locking errors.
+1. **Retrieval**: use `kb_find` for all reads — search, get page, or browse. Never grep wiki/ directly.
+2. **Writes**: use `kb_save` for all writes — create, update, or reindex. It auto-reindexes after every change.
+3. **Show before saving**: always draft the proposed title, body, tags, origin, and related links and show them to the user before calling `kb_save`.
+4. **Pages are just pages**: no prescribed sections. Pages have whatever structure the user gives them.
+5. **Preserve Obsidian compatibility**: wikilinks, flat YAML frontmatter.
+
+## MCP tools
+
+| Tool | Purpose |
+|------|---------|
+| `kb_find` | Search (query), get page (id), or browse (filters) |
+| `kb_save` | Create, update section, update metadata, or reindex pages |
+| `kb_status` | Index health check |
 
 ## Frontmatter
 
@@ -31,15 +39,11 @@ created_at: 2026-01-01
 updated_at: 2026-01-01
 ```
 
-- `sources:` — graph edges to wiki pages (used by explore/synthesis detection)
+- `sources:` — graph edges to wiki pages (pages this was built from)
 - `raw_sources:` — provenance pointers to `.raw/` files (NOT graph edges)
 - `aliases:` — old names/paths, survive `pkb rebuild --force`
 - Wikilinks are pathless: `[[agent-memory]]` not `[[concepts/agent-memory]]`
 - Omit optional fields rather than leaving them blank.
-
-## Page structure
-
-Pages can have a `## Notes` section (user content) and a `## Synthesis` section (compiled by LLM). During compilation, only `## Synthesis` is rewritten — `## Notes` is preserved.
 
 ## CLI
 

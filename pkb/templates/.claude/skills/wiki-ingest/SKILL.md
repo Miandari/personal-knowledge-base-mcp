@@ -164,15 +164,15 @@ Steps:
 
 1. **Read** the source completely. Do not skim.
 2. **Discuss** key takeaways with the user. Ask: "What should I emphasize? How granular?" Skip this if the user says "just ingest it."
-3. **Create the page** using `kb_add`:
-   - Determine `type` (source, entity, concept) from the content
+3. **Create the page** using `kb_save`:
+   - Determine `origin` (webpage, paper, conversation, note, book, transcript) from the content
    - Extract `title`, `tags`, `sentiment`, `source_url` from the source
-   - Write the markdown body following the frontmatter schema from `references/frontmatter.md`
+   - Write the markdown body following the frontmatter schema
    - Set these briefing-aware universal fields when applicable:
      - `sentiment`: one of `critical | skeptical | neutral | mixed | enthusiastic` — your honest read of how the source frames its subject. Omit if genuinely neutral / N/A.
      - `ingested_via`: one of `notion_briefing | manual | web_fetch | youtube_mcp` — how this source reached the vault.
-   - Call: `kb_add(title=..., type=..., body=..., tags=[...], source_url=..., sentiment=..., ingested_via=...)`
-   - `kb_add` writes the file AND indexes it immediately. The page is searchable right away.
+   - Call: `kb_save(title=..., origin=..., body=..., tags=[...], source_url=..., sentiment=..., ingested_via=...)`
+   - `kb_save` writes the file, indexes it, and returns `suggested_related` and `suggested_tags`.
 4. **Update `wiki/index.md`** — add an entry for the new page.
 5. **Append** to `wiki/log.md` (new entries at the TOP):
     ```markdown
@@ -182,11 +182,11 @@ Steps:
     - Pages created: [[Page 1]]
     - Key insight: One sentence on what is new.
     ```
-6. **Reindex meta pages** — you MUST execute these calls sequentially, one at a time. Do not run indexing tools in parallel (concurrent writes cause database locking errors):
-   - First: `kb_reindex(file_path="wiki/index.md")`
-   - Then: `kb_reindex(file_path="wiki/log.md")`
-7. **Check for contradictions** against existing pages. If found, add `> [!contradiction]` callouts on both pages. After editing any existing page, call `kb_reindex(file_path=...)` on it before proceeding.
-8. **Offer to explore**: "Added [[page-title]] as a seed page. Run `explore: <topic>` to see what it connects to and whether related concept pages need recompilation."
+6. **Reindex meta pages** — execute these sequentially (concurrent writes cause database locking):
+   - First: `kb_save(id="index")`
+   - Then: `kb_save(id="log")`
+7. **Check for contradictions** against existing pages. If found, add `> [!contradiction]` callouts on both pages. After editing any existing page, call `kb_save(id=...)` to reindex it.
+8. **Offer to explore**: "Added [[page-title]] as a seed page. Search `kb_find(query=...)` to see what it connects to."
 
 ---
 
@@ -199,7 +199,7 @@ Steps:
 1. List all files to process. Confirm with user before starting.
 2. Process each source following the single ingest flow. Defer cross-referencing between sources until step 3.
 3. After all sources: do a cross-reference pass. Look for connections between the newly ingested sources.
-4. Update index, hot cache, and log once at the end (not per-source). Reindex meta pages sequentially (one `kb_reindex` at a time — no parallel calls).
+4. Update index, hot cache, and log once at the end (not per-source). Reindex meta pages sequentially (one `kb_save(id=...)` at a time — no parallel calls).
 5. Report: "Processed N sources. Created X pages, updated Y pages. Here are the key connections I found."
 
 Batch ingest is less interactive. For 30+ sources, expect significant processing time. Check in with the user after every 10 sources.
