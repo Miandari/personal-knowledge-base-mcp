@@ -45,7 +45,7 @@ class TestRawDumps:
             if fm is None:
                 failures.append(f"{date}: no frontmatter")
                 continue
-            for field in ("source_type", "briefing_date", "ingested_via"):
+            for field in ("source_type", "published_at", "ingested_via"):
                 if field not in fm:
                     failures.append(f"{date}: missing '{field}'")
             if fm.get("ingested_via") != "notion_briefing":
@@ -88,7 +88,10 @@ class TestCompiledPages:
         assert fm is not None, "No frontmatter"
         assert fm.get("sentiment") == "critical", f"sentiment should be 'critical', got '{fm.get('sentiment')}'"
         assert fm.get("ingested_via") == "notion_briefing", f"ingested_via wrong: {fm.get('ingested_via')}"
-        assert fm.get("briefing_date") == "2026-03-28" or str(fm.get("briefing_date")) == "2026-03-28"
+        # published_at carries the article's own publication date (was date_published);
+        # the briefing's own date (2026-03-28) is captured in the .raw/notion file's frontmatter.
+        assert str(fm.get("published_at")) == "2026-03-26", \
+            f"published_at should be article pub date '2026-03-26', got '{fm.get('published_at')}'"
         assert "ai-coding-agents" in (fm.get("tags") or []), f"tags missing 'ai-coding-agents': {fm.get('tags')}"
         assert fm.get("url") or fm.get("source_url"), "Missing source URL"
 

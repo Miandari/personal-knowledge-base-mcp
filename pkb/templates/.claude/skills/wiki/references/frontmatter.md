@@ -46,7 +46,6 @@ Omit if not applicable — empty strings are worse than missing keys (BM25 index
 ```yaml
 # Provenance
 ingested_via: manual            # manual|claude_code|claude_ui|notion_briefing|web_fetch|youtube_mcp
-briefing_date: 2026-03-28      # if from a daily briefing
 raw_sources:                    # provenance pointers to .raw/ files (NOT graph edges)
   - ".raw/notion/2026-04-10.md"
 
@@ -58,7 +57,7 @@ domain: ai-development
 
 # Source-specific
 author: "Author Name"
-date_published: 2026-03-26
+published_at: 2026-03-26        # source's own publication date — accepts YYYY, YYYY-MM, or YYYY-MM-DD; pkb preserves the precision you specify
 url: "https://..."
 key_claims:
   - "First key claim"

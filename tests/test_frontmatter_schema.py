@@ -91,17 +91,36 @@ class TestUniversalFields:
         assert not failures, "\n".join(failures)
 
     def test_date_formats(self, vault_path):
+        # created_at and updated_at are system-managed full dates;
+        # they must match strict YYYY-MM-DD.
+        # published_at is user-facing and supports partial precision —
+        # validated separately in test_published_at_format.
         failures = []
         for page in _all_wiki_pages(vault_path):
             fm = _extract_frontmatter(page)
             if fm is None:
                 continue
             rel = str(page.relative_to(vault_path))
-            for field in ("created_at", "updated_at", "briefing_date"):
+            for field in ("created_at", "updated_at"):
                 if field in fm and fm[field] is not None:
                     val = str(fm[field])
                     if not DATE_RE.match(val):
                         failures.append(f"{rel}: {field}='{val}' is not YYYY-MM-DD")
+        assert not failures, "\n".join(failures)
+
+    def test_published_at_format(self, vault_path):
+        """published_at supports YYYY, YYYY-MM, or YYYY-MM-DD — validated via parse_date."""
+        from pkb.dates import parse_date
+        failures = []
+        for page in _all_wiki_pages(vault_path):
+            fm = _extract_frontmatter(page)
+            if fm is None or "published_at" not in fm:
+                continue
+            rel = str(page.relative_to(vault_path))
+            val = fm["published_at"]
+            if val is not None and val != "" and parse_date(val) is None:
+                failures.append(
+                    f"{rel}: published_at={val!r} is not a valid YYYY / YYYY-MM / YYYY-MM-DD")
         assert not failures, "\n".join(failures)
 
 
@@ -144,7 +163,7 @@ class TestOptionalFieldValues:
     def test_no_empty_optional_fields(self, vault_path):
         """Optional provenance fields should be omitted, not set to empty string."""
         failures = []
-        optional_fields = ("sentiment", "ingested_via", "briefing_date")
+        optional_fields = ("sentiment", "ingested_via", "published_at")
         for page in _all_wiki_pages(vault_path):
             fm = _extract_frontmatter(page)
             if fm is None:

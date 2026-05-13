@@ -37,7 +37,7 @@ Known month-page IDs (cache as we discover more):
    ---
    source_type: notion_briefing
    source_url: "https://www.notion.so/{day_page_id_no_dashes}"
-   briefing_date: YYYY-MM-DD
+   published_at: YYYY-MM-DD
    fetched: <today YYYY-MM-DD>
    ingested_via: notion_briefing
    ---
@@ -50,7 +50,7 @@ Known month-page IDs (cache as we discover more):
 
 7. **Delegate to wiki-ingest.** Invoke the `wiki-ingest` skill on the raw file path. Pass instructions that every extracted source, entity, and concept page created from this briefing must carry:
    - `ingested_via: notion_briefing`
-   - `briefing_date: YYYY-MM-DD`  (the briefing date, not today)
+   - `published_at: YYYY-MM-DD`  (the briefing date, not today)
    - `sentiment` should be set for **any** page where the source takes a clear stance — especially critical/skeptical takes, since those are the ones retrieval will ask about later.
 
 8. **Extraction targets.** Tell wiki-ingest to specifically look for and extract:

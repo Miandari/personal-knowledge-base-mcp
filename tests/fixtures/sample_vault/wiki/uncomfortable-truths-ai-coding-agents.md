@@ -3,7 +3,6 @@ title: Some uncomfortable truths about AI coding agents
 origin: webpage
 status: developing
 ingested_via: notion_briefing
-briefing_date: 2026-03-28
 aliases:
   - "sources/uncomfortable-truths-ai-coding-agents"
 tags:
@@ -23,7 +22,7 @@ raw_sources:
 sentiment: critical
 confidence: high
 author: sarah_builds
-date_published: 2026-03-26
+published_at: 2026-03-26
 url: "https://standupforme.app/blog/some-uncomfortable-truths-about-ai-coding-agents/"
 key_claims:
   - "LLM-based AI coding agents have no place in generating production code for any software built professionally."

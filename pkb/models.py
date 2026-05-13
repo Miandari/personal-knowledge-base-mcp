@@ -1,40 +1,69 @@
 """Pydantic models for search results, exploration, and node summaries."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, computed_field
+
+from .dates import relative_time
 
 
-class NodeSummary(BaseModel):
+class _DatedModel(BaseModel):
+    """Mixin-like base providing date fields + precision-aware relative renders.
+
+    `published_at_start` and `published_at_precision` are internal-only —
+    `exclude=True` keeps them out of `model_dump()` so MCP responses stay clean.
+    The computed `*_relative` fields are what callers see.
+    """
+
+    created_at: str | None = None
+    updated_at: str
+    published_at: str | None = None
+    published_at_start: str | None = Field(default=None, exclude=True)
+    published_at_precision: str | None = Field(default=None, exclude=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def created_relative(self) -> str | None:
+        return relative_time(self.created_at, "day")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def updated_relative(self) -> str | None:
+        return relative_time(self.updated_at, "day")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def published_relative(self) -> str | None:
+        return relative_time(self.published_at_start, self.published_at_precision)
+
+
+class NodeSummary(_DatedModel):
     """Lightweight node reference used in lists and edges."""
     id: str
     title: str
     origin: str
     status: str
-    updated_at: str
     file_path: str = ""
     snippet: str = ""
 
 
-class SearchResult(BaseModel):
+class SearchResult(_DatedModel):
     """A single hybrid search result."""
     node_id: str
     title: str
     origin: str
     status: str
-    updated_at: str
     score: float              # raw RRF score (do NOT normalize)
     vec_distance: float | None = None  # raw cosine distance from best chunk
     snippet: str = ""
 
 
-class NodeDetail(BaseModel):
+class NodeDetail(_DatedModel):
     """Full page content + metadata + edges."""
     id: str
     file_path: str
     title: str
     origin: str
     status: str
-    created_at: str
-    updated_at: str
+    created_at: str  # required for detail view (override parent's optional)
     body: str
     word_count: int = 0
     tags: list[str] = []

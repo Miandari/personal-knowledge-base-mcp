@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 
 from . import config
+from .dates import parse_date
 from .db import get_connection, init_schema
 from .embeddings import EmbeddingProvider, get_provider, content_hash as compute_content_hash
 
@@ -365,17 +366,38 @@ class Indexer:
         title = str(fm.get("title", ""))
         origin = str(fm.get("origin") or fm.get("type", "meta"))
         status = str(fm.get("status", "seed"))
-        created_at = str(fm.get("created_at") or fm.get("created", ""))
-        updated_at = str(fm.get("updated_at") or fm.get("updated", created_at))
+        # Normalize created/updated through parse_date so YAML int / date /
+        # datetime / "2024-03-15T10:30:00Z" all collapse to YYYY-MM-DD.
+        # Store pd.start, never the raw, so lex comparisons in WHERE clauses are honest.
+        created_pd = parse_date(fm.get("created_at") or fm.get("created"))
+        updated_pd = parse_date(fm.get("updated_at") or fm.get("updated"))
+        created_at = created_pd.start if created_pd else ""
+        updated_at = updated_pd.start if updated_pd else created_at
+
+        # published_at supports partial precision. Falls back to legacy
+        # `briefing_date` so existing briefing pages stay date-filterable
+        # without requiring markdown rewrite.
+        published_raw = fm.get("published_at")
+        if published_raw is None:
+            published_raw = fm.get("briefing_date")
+        pd_pub = parse_date(published_raw)
+        published_at_raw = str(published_raw) if published_raw is not None else None
+        published_at_start = pd_pub.start if pd_pub else None
+        published_at_end = pd_pub.end if pd_pub else None
+        published_at_precision = pd_pub.precision if pd_pub else None
+
         tags = fm.get("tags") or []
         aliases = fm.get("aliases") or []
 
         self.conn.execute("""
             INSERT INTO nodes (id, file_path, title, origin, status, created_at, updated_at,
                                sentiment, complexity, confidence,
-                               ingested_via, briefing_date, url, author,
+                               ingested_via,
+                               published_at, published_at_start,
+                               published_at_end, published_at_precision,
+                               url, author,
                                body, word_count, file_hash, indexed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 file_path = excluded.file_path,
                 title = excluded.title,
@@ -387,7 +409,10 @@ class Indexer:
                 complexity = excluded.complexity,
                 confidence = excluded.confidence,
                 ingested_via = excluded.ingested_via,
-                briefing_date = excluded.briefing_date,
+                published_at = excluded.published_at,
+                published_at_start = excluded.published_at_start,
+                published_at_end = excluded.published_at_end,
+                published_at_precision = excluded.published_at_precision,
                 url = excluded.url,
                 author = excluded.author,
                 body = excluded.body,
@@ -398,7 +423,9 @@ class Indexer:
             node_id, rel_path, title, origin, status, created_at, updated_at,
             fm.get("sentiment"),
             fm.get("complexity"), fm.get("confidence"),
-            fm.get("ingested_via"), str(fm.get("briefing_date", "")) or None,
+            fm.get("ingested_via"),
+            published_at_raw, published_at_start,
+            published_at_end, published_at_precision,
             fm.get("url") or fm.get("source_url"), fm.get("author"),
             body, len(body.split()),
             new_hash,

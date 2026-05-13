@@ -17,7 +17,15 @@ CREATE TABLE IF NOT EXISTS nodes (
     complexity    TEXT,
     confidence    TEXT,
     ingested_via  TEXT,
-    briefing_date TEXT,
+    -- Publication date (source's own date, distinct from created_at).
+    -- Supports partial precision (year / year-month / year-month-day).
+    -- `published_at` stores the raw form for display; `_start`/`_end`
+    -- bracket a half-open interval for filtering; `_precision` lets
+    -- the renderer be honest about what the user actually wrote.
+    published_at           TEXT,
+    published_at_start     TEXT,  -- YYYY-MM-DD, inclusive
+    published_at_end       TEXT,  -- YYYY-MM-DD, exclusive
+    published_at_precision TEXT,  -- 'year' | 'month' | 'day'
     url           TEXT,
     author        TEXT,
     -- Full content
@@ -103,13 +111,16 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
 -- ═══════════════════════════════════════════════════════════════
 -- INDEXES
 -- ═══════════════════════════════════════════════════════════════
-CREATE INDEX IF NOT EXISTS idx_edges_to       ON edges(to_id, edge_type);
-CREATE INDEX IF NOT EXISTS idx_edges_from     ON edges(from_id, edge_type);
-CREATE INDEX IF NOT EXISTS idx_nodes_origin   ON nodes(origin);
-CREATE INDEX IF NOT EXISTS idx_nodes_updated  ON nodes(updated_at);
-CREATE INDEX IF NOT EXISTS idx_nodes_status   ON nodes(status);
-CREATE INDEX IF NOT EXISTS idx_chunks_node    ON chunks(node_id);
-CREATE INDEX IF NOT EXISTS idx_tags_tag       ON tags(tag);
+CREATE INDEX IF NOT EXISTS idx_edges_to              ON edges(to_id, edge_type);
+CREATE INDEX IF NOT EXISTS idx_edges_from            ON edges(from_id, edge_type);
+CREATE INDEX IF NOT EXISTS idx_nodes_origin          ON nodes(origin);
+CREATE INDEX IF NOT EXISTS idx_nodes_created         ON nodes(created_at);
+CREATE INDEX IF NOT EXISTS idx_nodes_updated         ON nodes(updated_at);
+CREATE INDEX IF NOT EXISTS idx_nodes_status          ON nodes(status);
+CREATE INDEX IF NOT EXISTS idx_nodes_published_start ON nodes(published_at_start);
+CREATE INDEX IF NOT EXISTS idx_nodes_published_end   ON nodes(published_at_end);
+CREATE INDEX IF NOT EXISTS idx_chunks_node           ON chunks(node_id);
+CREATE INDEX IF NOT EXISTS idx_tags_tag              ON tags(tag);
 
 -- ═══════════════════════════════════════════════════════════════
 -- VIRTUAL TABLE CLEANUP TRIGGER

@@ -1,11 +1,114 @@
 """Hybrid search (FTS5 + sqlite-vec + RRF), graph traversal, staleness, explore."""
 
+import os
 import struct
 from datetime import datetime, date
 
 from . import config
 from .models import SearchResult, NodeSummary, NodeDetail, ExploreResult, StatusResult
 from .embeddings import EmbeddingProvider, get_provider
+
+
+# ── Column selection helpers ───────────────────────────────────────────
+# Single source of truth for "which nodes columns do we hydrate models with"
+# so future column additions are a one-line change instead of editing
+# eleven SELECT sites.
+
+_NODE_VIEW_COLS = (
+    "n.id, n.title, n.origin, n.status, "
+    "n.created_at, n.updated_at, "
+    "n.published_at, n.published_at_start, n.published_at_precision, "
+    "n.file_path, n.body"
+)
+
+
+def _row_to_summary(r, snippet_len: int = 200) -> NodeSummary:
+    """Hydrate a nodes row into a NodeSummary. Row must include _NODE_VIEW_COLS."""
+    return NodeSummary(
+        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
+        created_at=_safe(r, "created_at"),
+        updated_at=r["updated_at"] or "",
+        published_at=_safe(r, "published_at"),
+        published_at_start=_safe(r, "published_at_start"),
+        published_at_precision=_safe(r, "published_at_precision"),
+        file_path=_safe(r, "file_path") or "",
+        snippet=(r["body"][:snippet_len] if "body" in r.keys() and r["body"] else ""),
+    )
+
+
+def _row_to_search_result(r, score: float, vec_distance: float | None = None,
+                          snippet_len: int = 300) -> SearchResult:
+    """Hydrate a nodes row into a SearchResult."""
+    return SearchResult(
+        node_id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
+        created_at=_safe(r, "created_at"),
+        updated_at=r["updated_at"] or "",
+        published_at=_safe(r, "published_at"),
+        published_at_start=_safe(r, "published_at_start"),
+        published_at_precision=_safe(r, "published_at_precision"),
+        score=score,
+        vec_distance=vec_distance,
+        snippet=(r["body"][:snippet_len] if "body" in r.keys() and r["body"] else ""),
+    )
+
+
+def _safe(row, key: str):
+    """Return row[key] if the column is present in the row, else None.
+    Lets the same helper work with SELECTs that don't include every view column."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
+# ── Date filter helpers ───────────────────────────────────────────────
+
+def _build_date_predicates(filters: dict) -> tuple[str, list]:
+    """Translate normalized date filter strings into SQL WHERE clauses.
+
+    Filters are pre-validated by the caller (see server.kb_find) — values
+    here are full YYYY-MM-DD strings or absent.
+
+    Semantics (overlap, see CLAUDE.md / _FIND_DESC):
+      - created_after  → n.created_at >= X
+      - created_before → n.created_at <  X
+      - published_after  → n.published_at_end   > X  (interval extends past X)
+      - published_before → n.published_at_start < X  (interval begins before X)
+    """
+    clauses: list[str] = []
+    params: list = []
+    if v := filters.get("created_after"):
+        clauses.append("n.created_at >= ?")
+        params.append(v)
+    if v := filters.get("created_before"):
+        clauses.append("n.created_at < ?")
+        params.append(v)
+    if v := filters.get("published_after"):
+        clauses.append("n.published_at_end > ?")
+        params.append(v)
+    if v := filters.get("published_before"):
+        clauses.append("n.published_at_start < ?")
+        params.append(v)
+    return (" AND ".join(clauses), params)
+
+
+def _row_passes_date_filters(row, filters: dict) -> bool:
+    """Python-side equivalent of _build_date_predicates for the vec post-filter path.
+    Row must carry created_at and the two published_at_* interval columns when
+    those filters are set."""
+    if v := filters.get("created_after"):
+        if not row["created_at"] or row["created_at"] < v:
+            return False
+    if v := filters.get("created_before"):
+        if not row["created_at"] or row["created_at"] >= v:
+            return False
+    if v := filters.get("published_after"):
+        if not row["published_at_end"] or row["published_at_end"] <= v:
+            return False
+    if v := filters.get("published_before"):
+        if not row["published_at_start"] or row["published_at_start"] >= v:
+            return False
+    return True
 
 
 # ── Hybrid search ─────────────────────────────────────────────────────
@@ -37,12 +140,12 @@ def hybrid_search(
     sentiment_filter = filters.get("sentiment")
 
     # ── FTS5 results ──
-    fts_results = _fts_search(conn, query, origin_filter, sentiment_filter, candidate_limit)
+    fts_results = _fts_search(conn, query, origin_filter, sentiment_filter, candidate_limit, filters)
 
     # ── Vector results ──
     vec_results = []
     if embedding_provider and vec_weight > 0:
-        vec_results = _vec_search(conn, query, embedding_provider, origin_filter, sentiment_filter, candidate_limit)
+        vec_results = _vec_search(conn, query, embedding_provider, origin_filter, sentiment_filter, candidate_limit, filters)
 
     # ── RRF fusion ──
     scores: dict[str, float] = {}
@@ -70,20 +173,12 @@ def hybrid_search(
     results = []
     for node_id, score in ranked:
         row = conn.execute(
-            "SELECT id, title, origin, status, updated_at, body FROM nodes WHERE id = ?",
+            f"SELECT {_NODE_VIEW_COLS} FROM nodes n WHERE n.id = ?",
             (node_id,),
         ).fetchone()
         if row:
-            results.append(SearchResult(
-                node_id=row["id"],
-                title=row["title"],
-                origin=row["origin"],
-                status=row["status"],
-                updated_at=row["updated_at"],
-                score=score,
-                vec_distance=vec_distances.get(node_id),
-                snippet=row["body"][:300] if row["body"] else "",
-            ))
+            results.append(_row_to_search_result(row, score=score,
+                                                  vec_distance=vec_distances.get(node_id)))
 
     return results
 
@@ -100,7 +195,8 @@ def fts_search(
     sentiment_filter = filters.get("sentiment")
 
     # Request more candidates to allow for meta demotion
-    fts_ids = _fts_search(conn, query, origin_filter, sentiment_filter, limit + len(config.META_NODE_IDS))
+    fts_ids = _fts_search(conn, query, origin_filter, sentiment_filter,
+                          limit + len(config.META_NODE_IDS), filters)
 
     # Demote structural pages by moving them to the end
     content_ids = [nid for nid in fts_ids if nid not in config.META_NODE_IDS]
@@ -110,20 +206,11 @@ def fts_search(
     results = []
     for rank, node_id in enumerate(fts_ids, 1):
         row = conn.execute(
-            "SELECT id, title, origin, status, updated_at, body FROM nodes WHERE id = ?",
+            f"SELECT {_NODE_VIEW_COLS} FROM nodes n WHERE n.id = ?",
             (node_id,),
         ).fetchone()
         if row:
-            results.append(SearchResult(
-                node_id=row["id"],
-                title=row["title"],
-                origin=row["origin"],
-                status=row["status"],
-                updated_at=row["updated_at"],
-                score=1.0 / (60.0 + rank),
-                vec_distance=None,
-                snippet=row["body"][:300] if row["body"] else "",
-            ))
+            results.append(_row_to_search_result(row, score=1.0 / (60.0 + rank)))
 
     return results
 
@@ -134,6 +221,7 @@ def _fts_search(
     origin_filter: str | None,
     sentiment_filter: str | None,
     limit: int,
+    filters: dict | None = None,
 ) -> list[str]:
     """Run FTS5 search, return ordered node IDs."""
     # Escape FTS5 special characters and build a safe query
@@ -155,6 +243,12 @@ def _fts_search(
     if sentiment_filter:
         sql += " AND n.sentiment = ?"
         params.append(sentiment_filter)
+
+    # Date filters — pushed into SQL so filter-then-limit semantics hold
+    date_clauses, date_params = _build_date_predicates(filters or {})
+    if date_clauses:
+        sql += " AND " + date_clauses
+        params.extend(date_params)
 
     sql += " ORDER BY bm25(nodes_fts, 10.0, 5.0, 2.0) LIMIT ?"
     params.append(limit)
@@ -203,14 +297,29 @@ def _vec_search(
     origin_filter: str | None,
     sentiment_filter: str | None,
     limit: int,
+    filters: dict | None = None,
 ) -> list[tuple[str, float]]:
     """Run vector search, return list of (node_id, distance).
+
+    Date filters degrade vec recall — top-K nearest may not all pass the date
+    predicate. Mitigation: over-fetch (with floor 100, no hard ceiling) and
+    post-filter in Python. The over-fetch factor is large enough to cover
+    most reasonable filter restrictivenesses on a personal-scale corpus.
+
+    Forcing the over-fetch path even when sqlite-vec prefilter support is
+    added in the future: set PKB_VEC_FORCE_OVERFETCH=1 (used by tests to
+    keep the fallback path live).
 
     sqlite-vec's vec0 requires `k=?` in the WHERE clause for knn queries
     and doesn't support arbitrary JOINs in the knn query itself. So we:
     1. Run the knn query on chunks_vec alone (with generous k)
     2. Join with chunks + nodes in Python for filtering
     """
+    filters = filters or {}
+    has_date_filter = any(filters.get(k) for k in
+                          ("created_after", "created_before",
+                           "published_after", "published_before"))
+
     try:
         query_embedding = provider.embed([query], input_type="query")[0]
     except Exception:
@@ -218,8 +327,10 @@ def _vec_search(
 
     emb_bytes = struct.pack(f"{len(query_embedding)}f", *query_embedding)
 
-    # Step 1: knn on vec0 (no joins allowed in the knn query)
-    k = min(limit * 5, 200)  # generous k for post-filtering
+    # Over-fetch: scale with limit, generous floor, no hard ceiling.
+    # SQLite handles a few hundred rows trivially on local hardware.
+    k = max(limit * 5, 100) if (has_date_filter or origin_filter or sentiment_filter) else max(limit * 5, 50)
+
     try:
         rows = conn.execute(
             "SELECT rowid, distance FROM chunks_vec WHERE embedding MATCH ? AND k = ?",
@@ -246,16 +357,20 @@ def _vec_search(
 
         node_id = chunk_row["node_id"]
 
-        # Apply filters
-        if origin_filter or sentiment_filter:
+        # Apply filters — fetch the node row once if any filter is active
+        if origin_filter or sentiment_filter or has_date_filter:
             node_row = conn.execute(
-                "SELECT origin, sentiment FROM nodes WHERE id = ?", (node_id,)
+                "SELECT origin, sentiment, created_at, "
+                "published_at_start, published_at_end FROM nodes WHERE id = ?",
+                (node_id,),
             ).fetchone()
             if not node_row:
                 continue
             if origin_filter and node_row["origin"] != origin_filter:
                 continue
             if sentiment_filter and node_row["sentiment"] != sentiment_filter:
+                continue
+            if has_date_filter and not _row_passes_date_filters(node_row, filters):
                 continue
 
         # Keep best (lowest) distance per node
@@ -296,6 +411,9 @@ def get_node(conn, node_id: str) -> NodeDetail | None:
         status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        published_at=row["published_at"],
+        published_at_start=row["published_at_start"],
+        published_at_precision=row["published_at_precision"],
         body=row["body"],
         word_count=row["word_count"] or 0,
         tags=tags,
@@ -313,50 +431,34 @@ def get_node(conn, node_id: str) -> NodeDetail | None:
 def get_node_summary(conn, node_id: str) -> NodeSummary | None:
     """Get a lightweight node summary."""
     row = conn.execute(
-        "SELECT id, title, origin, status, updated_at, file_path, body FROM nodes WHERE id = ?",  # noqa: E501
+        f"SELECT {_NODE_VIEW_COLS} FROM nodes n WHERE n.id = ?",
         (node_id,),
     ).fetchone()
     if not row:
         return None
-    return NodeSummary(
-        id=row["id"],
-        title=row["title"],
-        origin=row["origin"],
-        status=row["status"],
-        updated_at=row["updated_at"],
-        file_path=row["file_path"],
-        snippet=row["body"][:300] if row["body"] else "",
-    )
+    return _row_to_summary(row, snippet_len=300)
 
 
 def _get_edge_targets(conn, from_id: str, edge_type: str) -> list[NodeSummary]:
     """Get nodes that from_id links TO via edge_type."""
-    rows = conn.execute("""
-        SELECT n.id, n.title, n.origin, n.status, n.updated_at, n.file_path, n.body
+    rows = conn.execute(f"""
+        SELECT {_NODE_VIEW_COLS}
         FROM edges e
         JOIN nodes n ON n.id = e.to_id
         WHERE e.from_id = ? AND e.edge_type = ?
     """, (from_id, edge_type)).fetchall()
-    return [NodeSummary(
-        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
-        updated_at=r["updated_at"], file_path=r["file_path"],
-        snippet=r["body"][:200] if r["body"] else "",
-    ) for r in rows]
+    return [_row_to_summary(r) for r in rows]
 
 
 def _get_edge_sources(conn, to_id: str, edge_type: str) -> list[NodeSummary]:
     """Get nodes that link TO to_id via edge_type (reverse direction)."""
-    rows = conn.execute("""
-        SELECT n.id, n.title, n.origin, n.status, n.updated_at, n.file_path, n.body
+    rows = conn.execute(f"""
+        SELECT {_NODE_VIEW_COLS}
         FROM edges e
         JOIN nodes n ON n.id = e.from_id
         WHERE e.to_id = ? AND e.edge_type = ?
     """, (to_id, edge_type)).fetchall()
-    return [NodeSummary(
-        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
-        updated_at=r["updated_at"], file_path=r["file_path"],
-        snippet=r["body"][:200] if r["body"] else "",
-    ) for r in rows]
+    return [_row_to_summary(r) for r in rows]
 
 
 # ── Graph traversal ───────────────────────────────────────────────────
@@ -411,12 +513,16 @@ def get_neighborhood(conn, node_id: str, radius: int = 2) -> list[NodeSummary]:
     """Get nodes within N hops (all edge types)."""
     rows = conn.execute("""
         WITH RECURSIVE nbr AS (
-            SELECT id, title, origin, status, updated_at, file_path, body, 0 AS depth, ',' || id || ',' AS path
+            SELECT id, title, origin, status, created_at, updated_at,
+                   published_at, published_at_start, published_at_precision,
+                   file_path, body, 0 AS depth, ',' || id || ',' AS path
             FROM nodes WHERE id = :start_id
 
             UNION ALL
 
-            SELECT n.id, n.title, n.origin, n.status, n.updated_at, n.file_path, n.body,
+            SELECT n.id, n.title, n.origin, n.status, n.created_at, n.updated_at,
+                   n.published_at, n.published_at_start, n.published_at_precision,
+                   n.file_path, n.body,
                    nb.depth + 1, nb.path || n.id || ','
             FROM nodes n
             JOIN edges e ON (e.to_id = n.id AND e.from_id = nb.id)
@@ -425,15 +531,13 @@ def get_neighborhood(conn, node_id: str, radius: int = 2) -> list[NodeSummary]:
             WHERE nb.depth < :radius
               AND instr(nb.path, ',' || n.id || ',') = 0
         )
-        SELECT DISTINCT id, title, origin, status, updated_at, file_path, body
+        SELECT DISTINCT id, title, origin, status, created_at, updated_at,
+               published_at, published_at_start, published_at_precision,
+               file_path, body
         FROM nbr WHERE id != :start_id
     """, {"start_id": node_id, "radius": radius}).fetchall()
 
-    return [NodeSummary(
-        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
-        updated_at=r["updated_at"], file_path=r["file_path"],
-        snippet=r["body"][:200] if r["body"] else "",
-    ) for r in rows]
+    return [_row_to_summary(r) for r in rows]
 
 
 # ── Staleness detection ───────────────────────────────────────────────
@@ -505,25 +609,26 @@ def detect_new_sources(
                     continue  # Too distant
             new_sources.append(NodeSummary(
                 id=hit.node_id, title=hit.title, origin=hit.origin,
-                status=hit.status, updated_at=hit.updated_at, snippet=hit.snippet,
+                status=hit.status, updated_at=hit.updated_at,
+                created_at=hit.created_at,
+                published_at=hit.published_at,
+                published_at_start=hit.published_at_start,
+                published_at_precision=hit.published_at_precision,
+                snippet=hit.snippet,
             ))
 
     # Also surface pages that explicitly declared related: [[this concept]]
     # These bypass timestamp/distance filters — the user's declaration is the signal.
     seen_ids = {s.id for s in new_sources} | known_source_ids | {concept_id} | meta_pages
     reverse_related = conn.execute(
-        "SELECT n.id, n.title, n.origin, n.status, n.updated_at, n.body "
+        f"SELECT {_NODE_VIEW_COLS} "
         "FROM edges e JOIN nodes n ON e.from_id = n.id "
         "WHERE e.to_id = ? AND e.edge_type = 'related'",
         (concept_id,),
     ).fetchall()
     for row in reverse_related:
         if row["id"] not in seen_ids:
-            new_sources.append(NodeSummary(
-                id=row["id"], title=row["title"], origin=row["origin"],
-                status=row["status"], updated_at=row["updated_at"],
-                snippet=row["body"][:200] if row["body"] else "",
-            ))
+            new_sources.append(_row_to_summary(row))
             seen_ids.add(row["id"])
 
     return new_sources
@@ -578,16 +683,12 @@ def explore(
         ).fetchall()
         for edge in source_edges:
             source = conn.execute(
-                "SELECT id, title, origin, status, updated_at, file_path, body FROM nodes WHERE id = ? AND updated_at > ?",
+                f"SELECT {_NODE_VIEW_COLS} FROM nodes n "
+                "WHERE n.id = ? AND n.updated_at > ?",
                 (edge["to_id"], synthesis_node.updated_at),
             ).fetchone()
             if source:
-                stale_sources.append(NodeSummary(
-                    id=source["id"], title=source["title"], origin=source["origin"],
-                    status=source["status"], updated_at=source["updated_at"],
-                    file_path=source["file_path"],
-                    snippet=source["body"][:200] if source["body"] else "",
-                ))
+                stale_sources.append(_row_to_summary(source))
 
         result.stale_sources = stale_sources
 
@@ -652,11 +753,19 @@ def list_nodes(
     origin_filter: str | None = None,
     tag_filter: str | None = None,
     status_filter: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    published_after: str | None = None,
+    published_before: str | None = None,
     sort: str = "updated_at",
     limit: int = 50,
 ) -> list[NodeSummary]:
-    """Filtered/sorted listing of nodes."""
-    sql = "SELECT DISTINCT n.id, n.title, n.origin, n.status, n.updated_at, n.file_path, n.body FROM nodes n"
+    """Filtered/sorted listing of nodes.
+
+    Date params expect pre-validated YYYY-MM-DD strings. See `_build_date_predicates`
+    for filter semantics (overlap on published_at_start/_end).
+    """
+    sql = f"SELECT DISTINCT {_NODE_VIEW_COLS} FROM nodes n"
     conditions = []
     params: list = []
 
@@ -673,19 +782,30 @@ def list_nodes(
         conditions.append("n.status = ?")
         params.append(status_filter)
 
+    date_clauses, date_params = _build_date_predicates({
+        "created_after": created_after,
+        "created_before": created_before,
+        "published_after": published_after,
+        "published_before": published_before,
+    })
+    if date_clauses:
+        conditions.append(date_clauses)
+        params.extend(date_params)
+
     if conditions:
         sql += " WHERE " + " AND ".join(conditions)
 
-    sort_col = {"updated_at": "n.updated_at", "created_at": "n.created_at", "title": "n.title"}.get(sort, "n.updated_at")
+    sort_col = {
+        "updated_at": "n.updated_at",
+        "created_at": "n.created_at",
+        "published_at": "n.published_at_start",  # sort by interval start
+        "title": "n.title",
+    }.get(sort, "n.updated_at")
     sql += f" ORDER BY {sort_col} DESC LIMIT ?"
     params.append(limit)
 
     rows = conn.execute(sql, params).fetchall()
-    return [NodeSummary(
-        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
-        updated_at=r["updated_at"], file_path=r["file_path"],
-        snippet=r["body"][:200] if r["body"] else "",
-    ) for r in rows]
+    return [_row_to_summary(r) for r in rows]
 
 
 def get_status(conn) -> StatusResult:

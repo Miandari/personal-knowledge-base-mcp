@@ -55,7 +55,7 @@ Max rounds: 3 (as set in program.md). Stop when depth is reached or max rounds h
 After research is complete, create these pages:
 
 **wiki/sources/**. One page per major reference found
-- Use source frontmatter (type, source_type, author, date_published, url, confidence, key_claims)
+- Use source frontmatter (type, source_type, author, published_at, url, confidence, key_claims)
 - Body: summary of the source, what it contributes to the topic
 
 **wiki/concepts/**. One page per significant concept extracted

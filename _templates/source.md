@@ -3,7 +3,7 @@ type: source
 title: "<% tp.file.title %>"
 source_type: article
 author: ""
-date_published: <% tp.date.now("YYYY-MM-DD") %>
+published_at: <% tp.date.now("YYYY-MM-DD") %>
 url: ""
 confidence: medium
 key_claims:

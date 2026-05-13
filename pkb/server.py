@@ -10,6 +10,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from . import config
+from .dates import parse_date
 from .db import get_connection, init_schema
 from .embeddings import get_provider
 from .indexer import Indexer, parse_markdown, file_md5, slug_from_path
@@ -18,6 +19,20 @@ from .search import (
     hybrid_search, fts_search, get_node, get_node_summary,
     list_nodes, get_status,
 )
+
+
+def _normalize_filter_date(name: str, raw: str) -> str | None:
+    """Validate a user-supplied date filter param. Raises ValueError on garbage.
+    Returns the normalized YYYY-MM-DD string, or None if input was empty."""
+    if not raw:
+        return None
+    pd = parse_date(raw)
+    if pd is None:
+        raise ValueError(
+            f"Invalid date for {name}: {raw!r}. "
+            f"Expected YYYY, YYYY-MM, or YYYY-MM-DD."
+        )
+    return pd.start
 
 mcp = FastMCP("pkb", instructions="""\
 Personal knowledge base tools. These access the user's PERSONAL wiki — \
@@ -40,16 +55,47 @@ Personal KB tool. Find and retrieve pages from the user's personal wiki.
 Use this when the user asks about their own knowledge, notes, or things
 they've previously saved — NOT for general knowledge questions.
 
-Modes (determined by parameters):
+Modes (chosen by which parameters you pass):
+- Get a page: kb_find(id="agent-memory") — full content + metadata + graph
+  edges. Returns None if not found.
 - Search: kb_find(query="agent memory") — hybrid FTS5 + vector search.
-  Returns ranked results with scores and snippets. Use "hybrid" mode
-  (default) for best quality; "bm25" for exact keyword matching.
-  Can combine with origin/sentiment filters for scoped search.
-- Get page: kb_find(id="agent-memory") — full page content + metadata +
-  graph edges (sources, sourced_by, related, wikilinks).
-  Returns None if the page doesn't exist.
-- Browse: kb_find(origin="paper") or kb_find(tag="rag") — filtered listing
-  of page summaries, sorted by the chosen field. Use id= to get full content.
+  Returns ranked results with scores and snippets. mode="hybrid" (default)
+  for best quality; "bm25" for exact keyword matching.
+- Browse: anything else — no id, no query. Returns the most recent pages
+  by `sort` (default: updated_at). Examples:
+    kb_find(limit=10)                         → 10 most recently updated pages
+    kb_find(sort="created_at", limit=20)      → 20 most recently added pages
+    kb_find(origin="paper")                   → all papers
+    kb_find(tag="rag")                        → pages tagged "rag"
+    kb_find(created_after="2026-05-01")       → everything added since May 1
+    kb_find(created_after="2026-05-06",
+            sort="created_at", limit=20)      → "what did I add last week?"
+
+Date semantics (important):
+- created_at = when YOU added the page to the KB. Use created_after /
+  created_before to answer "what did I add last week / this month?".
+  Every result includes both `created_at` (raw ISO) and `created_relative`
+  ("3 days ago"). Prefer surfacing `created_relative` in chat output.
+- updated_at = last time the page's content was edited. Use updated_*
+  filters only if the question is explicitly about edits.
+- published_at = the source's OWN publication date (a 2018 paper added
+  in 2026 has created_at=2026-…, published_at=2018-…). Use published_after /
+  published_before for "papers from 2022" style queries.
+
+Date filters use overlap semantics (matters only for partial-precision dates):
+- published_at: 2022 represents the interval [2022-01-01, 2023-01-01). It
+  MATCHES published_after="2022-07-01" (interval extends past July 1). It
+  does NOT match published_before="2022-01-01" (interval starts on Jan 1).
+- Filter inputs accept YYYY, YYYY-MM, or YYYY-MM-DD. Invalid values raise
+  a tool error.
+- Hybrid (vec) mode with very restrictive filters MAY return fewer than
+  `limit` results because nearest neighbors fall outside the filter window.
+  Use mode="bm25" if completeness matters more than semantic similarity.
+
+Each result includes `*_relative` fields ("3 days ago", "Oct 2024", "2018")
+that respect the original precision — a page with `published_at: 2018`
+renders as "2018", not "Jan 2018". Prefer the relative form in chat output;
+the raw ISO is there if you need exact comparisons.
 
 Results are ranked by Reciprocal Rank Fusion score. Only ordering matters —
 do not interpret raw score values as similarity percentages.
@@ -96,6 +142,13 @@ When saving insights from the current conversation, set origin="conversation".
 If conversation_search is available, use it to find the chat URL and pass
 it as source_url. Capture the actual insight in the body, not just a
 reference to the discussion.
+
+The optional `published_at` parameter records the source's own publication
+date (distinct from when you're filing the page). For papers/articles/
+briefings where the publication date is meaningful, pass it as YYYY,
+YYYY-MM, or YYYY-MM-DD — pkb preserves the precision you specify ("2018"
+stays "2018", not "Jan 2018"). Omit when unknown — never set to "".
+Invalid date strings raise an error.
 
 Does NOT fetch URLs — pass content directly in the body parameter."""
 
@@ -182,11 +235,22 @@ def kb_find(
     tag: str | None = None,
     status: str | None = None,
     sentiment: str | None = None,
+    created_after: str = "",
+    created_before: str = "",
+    published_after: str = "",
+    published_before: str = "",
     mode: str = "hybrid",
     sort: str = "updated_at",
     limit: int = 10,
 ) -> dict | list[dict] | None:
     """Find and retrieve pages from the personal wiki."""
+    # Validate date filter inputs up front — raise so MCP surfaces a clean
+    # tool error with the descriptive message, rather than silently skipping.
+    created_after_norm = _normalize_filter_date("created_after", created_after)
+    created_before_norm = _normalize_filter_date("created_before", created_before)
+    published_after_norm = _normalize_filter_date("published_after", published_after)
+    published_before_norm = _normalize_filter_date("published_before", published_before)
+
     conn = _get_conn()
     try:
         # Get by ID
@@ -194,19 +258,21 @@ def kb_find(
             detail = get_node(conn, id)
             return detail.model_dump() if detail else None
 
-        # Browse by filters (when no query given)
-        if not query and (origin or tag or status):
-            nodes = list_nodes(conn, origin_filter=origin, tag_filter=tag,
-                              status_filter=status, sort=sort, limit=limit)
-            return [n.model_dump() for n in nodes]
-
-        # Search by query (handles empty string gracefully)
-        if query or not (origin or tag or status):
-            filters = {}
+        # Search by query
+        if query:
+            filters: dict = {}
             if origin:
                 filters["origin"] = origin
             if sentiment:
                 filters["sentiment"] = sentiment
+            if created_after_norm:
+                filters["created_after"] = created_after_norm
+            if created_before_norm:
+                filters["created_before"] = created_before_norm
+            if published_after_norm:
+                filters["published_after"] = published_after_norm
+            if published_before_norm:
+                filters["published_before"] = published_before_norm
 
             if mode == "bm25":
                 results = fts_search(conn, query, limit=limit, filters=filters)
@@ -215,7 +281,19 @@ def kb_find(
                 results = hybrid_search(conn, query, limit=limit, filters=filters, embedding_provider=provider)
             return [r.model_dump() for r in results]
 
-        return {"error": "Provide query, id, or filters"}
+        # Browse — neither id nor query was given. List pages by sort + any
+        # filters (origin/tag/status/date) or just return the N most recent.
+        # "What's in my wiki?" / "what did I add last week?" route here.
+        nodes = list_nodes(
+            conn,
+            origin_filter=origin, tag_filter=tag, status_filter=status,
+            created_after=created_after_norm,
+            created_before=created_before_norm,
+            published_after=published_after_norm,
+            published_before=published_before_norm,
+            sort=sort, limit=limit,
+        )
+        return [n.model_dump() for n in nodes]
     finally:
         conn.close()
 
@@ -233,15 +311,25 @@ def kb_save(
     source_url: str = "",
     sentiment: str = "",
     status: str = "",
+    published_at: str = "",
     ingested_via: str = "manual",
 ) -> dict:
     """Create, update, or reindex pages in the personal wiki."""
+    # Validate published_at up front — raise so the LLM sees a clean error
+    # rather than silently writing garbage to frontmatter.
+    if published_at and parse_date(published_at) is None:
+        raise ValueError(
+            f"Invalid date for published_at: {published_at!r}. "
+            f"Expected YYYY, YYYY-MM, or YYYY-MM-DD."
+        )
+
     # --- Create new page ---
     if not id and title:
         return _create_page(
             title=title, origin=origin, body=body, source_url=source_url,
             tags=tags, sources=sources, related=related,
             sentiment=sentiment, ingested_via=ingested_via,
+            published_at=published_at,
         )
 
     # --- Update or reindex existing page ---
@@ -250,9 +338,10 @@ def kb_save(
             node_id=id, body=body, section=section,
             tags=tags, sources=sources, related=related,
             source_url=source_url, sentiment=sentiment, status=status,
+            published_at=published_at,
         )
 
-    return {"error": "Provide 'id' to update, or 'title' + 'origin' + 'body' to create."}
+    raise ValueError("Provide 'id' to update, or 'title' + 'origin' + 'body' to create.")
 
 
 @mcp.tool(description=_STATUS_DESC)
@@ -278,6 +367,7 @@ def _create_page(
     related: list[str] | None = None,
     sentiment: str = "",
     ingested_via: str = "manual",
+    published_at: str = "",
 ) -> dict:
     """Create a new wiki page, index it, and return summary with suggestions."""
     tags = tags or []
@@ -334,6 +424,10 @@ def _create_page(
             fm_lines.append(f'  - "[[{r}]]"')
     else:
         fm_lines.append("related: []")
+    if published_at:
+        # Emit raw user-provided form (any precision). Indexer normalizes
+        # for filter/sort but markdown is the source of truth.
+        fm_lines.append(f"published_at: {published_at}")
     fm_lines.append(f"created_at: {today}")
     fm_lines.append(f"updated_at: {today}")
     fm_lines.append("---")
@@ -402,6 +496,7 @@ def _update_page(
     source_url: str = "",
     sentiment: str = "",
     status: str = "",
+    published_at: str = "",
 ) -> dict:
     """Update an existing page (section, body, frontmatter, or reindex-only)."""
     conn = _get_conn()
@@ -414,7 +509,7 @@ def _update_page(
 
         has_body = bool(body)
         has_metadata = (tags is not None or sources is not None or related is not None
-                        or source_url or sentiment or status)
+                        or source_url or sentiment or status or published_at)
 
         if has_body and section:
             # Section update
@@ -441,6 +536,7 @@ def _update_page(
             content = _apply_frontmatter_updates(
                 content, tags=tags, sources=sources, related=related,
                 source_url=source_url, sentiment=sentiment, status=status,
+                published_at=published_at,
             )
             fp.write_text(content, encoding="utf-8")
 
@@ -462,6 +558,7 @@ def _apply_frontmatter_updates(
     source_url: str = "",
     sentiment: str = "",
     status: str = "",
+    published_at: str = "",
 ) -> str:
     """Update frontmatter fields in a markdown file's content string."""
     fm_match = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)
@@ -472,13 +569,16 @@ def _apply_frontmatter_updates(
     rest = content[fm_match.end():]
     lines = fm_text.split("\n")
 
-    # Update scalar fields
+    # Update scalar fields. Skip emission when value is empty so we never
+    # write `field: ` (omit-rather-than-empty rule).
     if status:
         lines = _set_fm_scalar(lines, "status", status)
     if sentiment:
         lines = _set_fm_scalar(lines, "sentiment", sentiment)
     if source_url:
         lines = _set_fm_scalar(lines, "url", f'"{source_url}"')
+    if published_at:
+        lines = _set_fm_scalar(lines, "published_at", published_at)
 
     # Update updated_at
     lines = _set_fm_scalar(lines, "updated_at", date.today().isoformat())

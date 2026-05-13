@@ -463,6 +463,32 @@ class TestKbFindList:
         r = kb_find()
         assert isinstance(r, list)
 
+    def test_bare_browse_returns_pages(self, mcp_sandbox):
+        """kb_find() with no id, no query, no filters should browse — not return [].
+        Regression: pre-fix this routed to the empty-query search path and yielded 0."""
+        r = kb_find()
+        assert isinstance(r, list)
+        assert len(r) >= 1, "bare kb_find() must return pages, not empty"
+
+    def test_browse_sort_created_at(self, mcp_sandbox):
+        """`kb_find(sort='created_at')` with no other params should list by created_at."""
+        r = kb_find(sort="created_at", limit=10)
+        assert isinstance(r, list)
+        assert len(r) >= 1
+        # Created dates should be sorted descending (most recent first)
+        cdates = [n.get("created_at") for n in r if n.get("created_at")]
+        assert cdates == sorted(cdates, reverse=True)
+
+    def test_browse_date_filter_only(self, mcp_sandbox):
+        """kb_find(created_after=…) with no other params should browse, not search."""
+        # Fixture pages have created_at: 2026-01-01; anything earlier than that
+        # cutoff means "show everything created on or after 2026-01-01" → all pages.
+        r = kb_find(created_after="2026-01-01", sort="created_at")
+        assert isinstance(r, list)
+        assert len(r) >= 1
+        for n in r:
+            assert n["created_at"] >= "2026-01-01"
+
 
 class TestKbSaveCreate:
     """kb_save creating new pages."""
@@ -1129,3 +1155,223 @@ class TestDetectNewSourcesRelated:
             assert "test-paper-alpha" not in candidate_ids
         finally:
             conn.close()
+
+
+# ── Temporal / date filter tests ─────────────────────────────────────
+
+
+class TestKbSavePublishedAt:
+    """kb_save with published_at — precision fidelity + validation."""
+
+    def test_save_full_date(self, mcp_sandbox):
+        try:
+            kb_save(title="Pub Date Day", origin="paper",
+                    body="Full date paper.", published_at="2022-08-15")
+            fp = config.WIKI_DIR / "pub-date-day.md"
+            assert fp.exists()
+            assert "published_at: 2022-08-15" in fp.read_text()
+
+            detail = kb_find(id="pub-date-day")
+            assert detail["published_at"] == "2022-08-15"
+            assert detail["published_relative"] == "Aug 2022" or \
+                detail["published_relative"] == "2022"  # depends on today
+        finally:
+            _cleanup_added_page("pub-date-day")
+
+    def test_save_year_only_precision_preserved(self, mcp_sandbox):
+        """A page saved with `published_at: 2022` must read back as '2022', NOT 'Jan 2022'."""
+        try:
+            kb_save(title="Pub Year Only", origin="paper",
+                    body="Year-only pub date.", published_at="2022")
+            fp = config.WIKI_DIR / "pub-year-only.md"
+            assert "published_at: 2022" in fp.read_text()
+            # Make sure we didn't accidentally write a padded form to the file
+            assert "published_at: 2022-01-01" not in fp.read_text()
+
+            detail = kb_find(id="pub-year-only")
+            assert detail["published_at"] == "2022"
+            assert detail["published_relative"] == "2022"
+            # Internal columns must not leak via model_dump
+            assert "published_at_start" not in detail
+            assert "published_at_precision" not in detail
+        finally:
+            _cleanup_added_page("pub-year-only")
+
+    def test_save_empty_published_at_omits_field(self, mcp_sandbox):
+        """Empty string must NOT emit a bare `published_at:` line."""
+        try:
+            kb_save(title="No Pub Date", origin="note",
+                    body="No publication date.", published_at="")
+            fp = config.WIKI_DIR / "no-pub-date.md"
+            assert "published_at:" not in fp.read_text()
+        finally:
+            _cleanup_added_page("no-pub-date")
+
+    def test_save_invalid_published_at_raises(self, mcp_sandbox):
+        """Garbage published_at must raise — silent drops would let bad data into frontmatter."""
+        with pytest.raises(ValueError, match="published_at"):
+            kb_save(title="Bad Date", origin="note",
+                    body="Bad date.", published_at="August 2022")
+
+
+class TestKbFindDateFilters:
+    """kb_find with created_after / created_before / published_after / published_before."""
+
+    def test_invalid_filter_raises(self, mcp_sandbox):
+        """Garbage filter input raises (no silent drops, no shape mismatch)."""
+        with pytest.raises(ValueError, match="created_after"):
+            kb_find(created_after="last week")
+
+    def test_created_after_filter(self, mcp_sandbox):
+        # All fixture pages have created_at: 2026-01-01 — filter after that returns nothing.
+        results = kb_find(created_after="2026-12-01", limit=50)
+        assert results == []
+
+        # Filter before that returns everything.
+        results = kb_find(created_after="2025-01-01", limit=50)
+        assert len(results) >= 5
+
+    def test_published_filter_overlap_semantics(self, mcp_sandbox):
+        """A year-only `published_at: 2022` row matches published_after='2022-01-01'
+        AND does NOT match published_before='2022-01-01' (overlap semantics)."""
+        try:
+            kb_save(title="Year Paper Filter", origin="paper",
+                    body="Year-only.", published_at="2022")
+
+            # Overlap: 2022 interval is [2022-01-01, 2023-01-01)
+            in_2022 = kb_find(published_after="2022-01-01",
+                              published_before="2023-01-01",
+                              limit=50)
+            ids = [r["id"] for r in in_2022] if in_2022 else []
+            assert "year-paper-filter" in ids
+
+            # _before with the start of the period excludes the row (start is not < start)
+            before_2022 = kb_find(published_before="2022-01-01", limit=50)
+            before_ids = [r["id"] for r in before_2022] if before_2022 else []
+            assert "year-paper-filter" not in before_ids
+        finally:
+            _cleanup_added_page("year-paper-filter")
+
+    def test_relative_fields_present(self, mcp_sandbox):
+        """Every search/browse result carries *_relative computed fields."""
+        results = kb_find(origin="note", limit=1)
+        assert len(results) >= 1
+        r = results[0]
+        # updated_relative is always present (updated_at is required on the model)
+        assert "updated_relative" in r
+
+    def test_what_did_i_add_last_week(self, mcp_sandbox):
+        """End-to-end: the 'what did I add to my KB in the last week?' use case.
+
+        Mirrors the canonical question that surfaced the dispatch bug in the
+        live Claude.ai session: it requires bare browse mode (no query, no
+        origin/tag/status), a created_after filter relative to today, sort
+        by created_at, and relative-time rendering. All in one call.
+        """
+        from datetime import date, timedelta
+
+        try:
+            # Create a brand-new page; kb_save stamps created_at = today.
+            kb_save(title="Brand New Page", origin="note",
+                    body="Something added recently.", tags=["test"])
+
+            today = date.today()
+            last_week = (today - timedelta(days=7)).isoformat()
+
+            # Exactly the call shape "what did I add last week?" should produce:
+            # no id, no query, no origin/tag/status — just a date filter + sort.
+            results = kb_find(created_after=last_week, sort="created_at", limit=20)
+
+            assert isinstance(results, list), \
+                f"Expected list, got {type(results).__name__}: {results!r}"
+
+            ids = [r["id"] for r in results]
+            assert "brand-new-page" in ids, \
+                f"Just-created page should appear in 'last week' query; got {ids}"
+
+            # All results must respect the filter — no page added before last_week.
+            for r in results:
+                assert r["created_at"] >= last_week, (
+                    f"Filter leak: {r['id']} has created_at={r['created_at']}, "
+                    f"before cutoff {last_week}"
+                )
+
+            # Sorted by created_at descending so the most-recent appears first.
+            cdates = [r["created_at"] for r in results]
+            assert cdates == sorted(cdates, reverse=True), \
+                f"Results not sorted by created_at desc: {cdates}"
+
+            # The brand-new page renders with a recent relative-time label.
+            new = next(r for r in results if r["id"] == "brand-new-page")
+            assert new["created_relative"] in ("today", "yesterday"), \
+                f"created_relative should be today/yesterday, got {new.get('created_relative')!r}"
+            # The LLM should prefer the relative form in chat output, but raw is also there.
+            assert new["created_at"] == today.isoformat()
+        finally:
+            _cleanup_added_page("brand-new-page")
+
+
+class TestLegacyBriefingDateFallback:
+    """The indexer reads `briefing_date` as a fallback for `published_at`."""
+
+    def test_legacy_fallback_populates_published_at(self, mcp_sandbox):
+        """A page with only briefing_date should expose published_at via the DB column."""
+        # Write a legacy-style page to the sandbox and index it directly.
+        # (kb_save reindex mode needs the page already in the DB.)
+        legacy_path = config.WIKI_DIR / "legacy-briefing-fallback.md"
+        legacy_path.write_text(textwrap.dedent("""\
+            ---
+            title: Legacy Briefing Fallback Test
+            origin: webpage
+            status: seed
+            ingested_via: notion_briefing
+            briefing_date: 2026-03-28
+            related: []
+            sources: []
+            created_at: 2026-03-28
+            updated_at: 2026-03-28
+            ---
+
+            # Legacy Briefing
+
+            Body.
+            """))
+        try:
+            conn = get_connection()
+            try:
+                provider = get_provider("noop")
+                indexer = Indexer(conn, embedding_provider=provider)
+                indexer.index_single(legacy_path)
+            finally:
+                conn.close()
+
+            detail = kb_find(id="legacy-briefing-fallback")
+            # published_at column should be populated from briefing_date
+            assert detail is not None
+            assert detail["published_at"] == "2026-03-28"
+            # Computed relative field also follows
+            assert detail["published_relative"] is not None
+        finally:
+            _cleanup_added_page("legacy-briefing-fallback")
+
+
+class TestVecDateFilterFallback:
+    """Vec mode + restrictive date filter works under the over-fetch fallback path.
+
+    PKB_VEC_FORCE_OVERFETCH=1 currently has no separate code path (over-fetch is the
+    only implementation), but the env var is reserved for the prefilter path coming
+    later. This test exercises the post-filter logic regardless.
+    """
+
+    def test_vec_filter_returns_only_matching(self, mcp_sandbox, monkeypatch):
+        monkeypatch.setenv("PKB_VEC_FORCE_OVERFETCH", "1")
+        # Fixture: all 6 fixture pages have created_at: 2026-01-01 or 2026-02-01
+        # Restrict to created_after 2026-03-01: zero results expected.
+        results = kb_find(query="memory", mode="hybrid",
+                          created_after="2026-03-01", limit=10)
+        assert results == []
+
+        # Restrict to created_after 2025-12-01: all relevant pages returned.
+        results = kb_find(query="memory", mode="hybrid",
+                          created_after="2025-12-01", limit=10)
+        assert len(results) >= 1

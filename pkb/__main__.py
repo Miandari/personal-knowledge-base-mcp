@@ -113,10 +113,12 @@ def cmd_search(args):
     else:
         if not results:
             print("No results.")
+        from .dates import relative_time
         for i, r in enumerate(results, 1):
             dist_str = f"  vec_dist={r.vec_distance:.4f}" if r.vec_distance is not None else ""
             print(f"{i}. [{r.origin}] {r.title} (score={r.score:.6f}{dist_str})")
-            print(f"   {r.node_id}  updated={r.updated_at}")
+            rel = relative_time(r.updated_at, "day") or "?"
+            print(f"   {r.node_id}  updated={r.updated_at} ({rel})")
             if r.snippet:
                 print(f"   {r.snippet[:120]}...")
             print()
