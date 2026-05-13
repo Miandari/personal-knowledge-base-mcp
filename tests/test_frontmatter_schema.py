@@ -12,7 +12,6 @@ import yaml
 
 
 VALID_ORIGINS = {"webpage", "paper", "conversation", "note", "book", "transcript", "meta"}
-VALID_STATUSES = {"seed", "developing", "mature", "evergreen"}
 VALID_SENTIMENTS = {"critical", "skeptical", "neutral", "mixed", "enthusiastic"}
 VALID_INGESTED_VIA = {"notion_briefing", "manual", "web_fetch", "youtube_mcp"}
 VALID_CONFIDENCE = {"high", "medium", "low"}
@@ -63,7 +62,7 @@ class TestUniversalFields:
             if fm is None:
                 continue  # caught by presence test
             rel = str(page.relative_to(vault_path))
-            for field in ("origin", "title", "created_at", "updated_at", "status"):
+            for field in ("origin", "title", "created_at", "updated_at"):
                 if field not in fm:
                     failures.append(f"{rel}: missing required field '{field}'")
         assert not failures, f"Frontmatter violations:\n" + "\n".join(failures)
@@ -77,17 +76,6 @@ class TestUniversalFields:
             if fm["origin"] not in VALID_ORIGINS:
                 rel = str(page.relative_to(vault_path))
                 failures.append(f"{rel}: origin='{fm['origin']}' not in {VALID_ORIGINS}")
-        assert not failures, "\n".join(failures)
-
-    def test_status_values(self, vault_path):
-        failures = []
-        for page in _all_wiki_pages(vault_path):
-            fm = _extract_frontmatter(page)
-            if fm is None or "status" not in fm:
-                continue
-            if fm["status"] not in VALID_STATUSES:
-                rel = str(page.relative_to(vault_path))
-                failures.append(f"{rel}: status='{fm['status']}' not in {VALID_STATUSES}")
         assert not failures, "\n".join(failures)
 
     def test_date_formats(self, vault_path):

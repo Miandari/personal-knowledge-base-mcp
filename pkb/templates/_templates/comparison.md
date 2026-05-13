@@ -12,7 +12,6 @@ created: <% tp.date.now("YYYY-MM-DD") %>
 updated: <% tp.date.now("YYYY-MM-DD") %>
 tags:
   - comparison
-status: seed
 related: []
 sources: []
 ---

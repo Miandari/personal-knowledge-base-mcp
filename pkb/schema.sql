@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS nodes (
     file_path     TEXT NOT NULL UNIQUE,-- "wiki/agent-memory.md"
     title         TEXT NOT NULL,
     origin        TEXT NOT NULL,       -- webpage|paper|conversation|note|book|transcript|meta
-    status        TEXT NOT NULL DEFAULT 'seed',
     created_at    TEXT NOT NULL,       -- YYYY-MM-DD
     updated_at    TEXT NOT NULL,
     -- Denormalized filterable fields
@@ -116,7 +115,6 @@ CREATE INDEX IF NOT EXISTS idx_edges_from            ON edges(from_id, edge_type
 CREATE INDEX IF NOT EXISTS idx_nodes_origin          ON nodes(origin);
 CREATE INDEX IF NOT EXISTS idx_nodes_created         ON nodes(created_at);
 CREATE INDEX IF NOT EXISTS idx_nodes_updated         ON nodes(updated_at);
-CREATE INDEX IF NOT EXISTS idx_nodes_status          ON nodes(status);
 CREATE INDEX IF NOT EXISTS idx_nodes_published_start ON nodes(published_at_start);
 CREATE INDEX IF NOT EXISTS idx_nodes_published_end   ON nodes(published_at_end);
 CREATE INDEX IF NOT EXISTS idx_chunks_node           ON chunks(node_id);

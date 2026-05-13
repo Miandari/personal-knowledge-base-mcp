@@ -15,7 +15,7 @@ from .embeddings import EmbeddingProvider, get_provider
 # eleven SELECT sites.
 
 _NODE_VIEW_COLS = (
-    "n.id, n.title, n.origin, n.status, "
+    "n.id, n.title, n.origin, "
     "n.created_at, n.updated_at, "
     "n.published_at, n.published_at_start, n.published_at_precision, "
     "n.file_path, n.body"
@@ -25,7 +25,7 @@ _NODE_VIEW_COLS = (
 def _row_to_summary(r, snippet_len: int = 200) -> NodeSummary:
     """Hydrate a nodes row into a NodeSummary. Row must include _NODE_VIEW_COLS."""
     return NodeSummary(
-        id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
+        id=r["id"], title=r["title"], origin=r["origin"],
         created_at=_safe(r, "created_at"),
         updated_at=r["updated_at"] or "",
         published_at=_safe(r, "published_at"),
@@ -40,7 +40,7 @@ def _row_to_search_result(r, score: float, vec_distance: float | None = None,
                           snippet_len: int = 300) -> SearchResult:
     """Hydrate a nodes row into a SearchResult."""
     return SearchResult(
-        node_id=r["id"], title=r["title"], origin=r["origin"], status=r["status"],
+        node_id=r["id"], title=r["title"], origin=r["origin"],
         created_at=_safe(r, "created_at"),
         updated_at=r["updated_at"] or "",
         published_at=_safe(r, "published_at"),
@@ -408,7 +408,6 @@ def get_node(conn, node_id: str) -> NodeDetail | None:
         file_path=row["file_path"],
         title=row["title"],
         origin=row["origin"],
-        status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         published_at=row["published_at"],
@@ -513,14 +512,14 @@ def get_neighborhood(conn, node_id: str, radius: int = 2) -> list[NodeSummary]:
     """Get nodes within N hops (all edge types)."""
     rows = conn.execute("""
         WITH RECURSIVE nbr AS (
-            SELECT id, title, origin, status, created_at, updated_at,
+            SELECT id, title, origin, created_at, updated_at,
                    published_at, published_at_start, published_at_precision,
                    file_path, body, 0 AS depth, ',' || id || ',' AS path
             FROM nodes WHERE id = :start_id
 
             UNION ALL
 
-            SELECT n.id, n.title, n.origin, n.status, n.created_at, n.updated_at,
+            SELECT n.id, n.title, n.origin, n.created_at, n.updated_at,
                    n.published_at, n.published_at_start, n.published_at_precision,
                    n.file_path, n.body,
                    nb.depth + 1, nb.path || n.id || ','
@@ -531,7 +530,7 @@ def get_neighborhood(conn, node_id: str, radius: int = 2) -> list[NodeSummary]:
             WHERE nb.depth < :radius
               AND instr(nb.path, ',' || n.id || ',') = 0
         )
-        SELECT DISTINCT id, title, origin, status, created_at, updated_at,
+        SELECT DISTINCT id, title, origin, created_at, updated_at,
                published_at, published_at_start, published_at_precision,
                file_path, body
         FROM nbr WHERE id != :start_id
@@ -609,7 +608,7 @@ def detect_new_sources(
                     continue  # Too distant
             new_sources.append(NodeSummary(
                 id=hit.node_id, title=hit.title, origin=hit.origin,
-                status=hit.status, updated_at=hit.updated_at,
+                updated_at=hit.updated_at,
                 created_at=hit.created_at,
                 published_at=hit.published_at,
                 published_at_start=hit.published_at_start,
@@ -702,14 +701,14 @@ def explore(
         source_chain = get_source_chain(conn, synthesis_node.id)
         result.source_chain = [
             NodeSummary(id=s["id"], title=s["title"], origin=s["origin"],
-                       status="", updated_at="")
+                       updated_at="")
             for s in source_chain if s["id"] != synthesis_node.id
         ]
 
         derived = get_derived_pages(conn, synthesis_node.id)
         result.derived_pages = [
             NodeSummary(id=d["id"], title=d["title"], origin=d["origin"],
-                       status="", updated_at="")
+                       updated_at="")
             for d in derived
         ]
 
@@ -746,13 +745,12 @@ def explore(
     return result
 
 
-# ── List / status ─────────────────────────────────────────────────────
+# ── List / index health ───────────────────────────────────────────────
 
 def list_nodes(
     conn,
     origin_filter: str | None = None,
     tag_filter: str | None = None,
-    status_filter: str | None = None,
     created_after: str | None = None,
     created_before: str | None = None,
     published_after: str | None = None,
@@ -777,10 +775,6 @@ def list_nodes(
     if origin_filter:
         conditions.append("n.origin = ?")
         params.append(origin_filter)
-
-    if status_filter:
-        conditions.append("n.status = ?")
-        params.append(status_filter)
 
     date_clauses, date_params = _build_date_predicates({
         "created_after": created_after,

@@ -40,7 +40,6 @@ class NodeSummary(_DatedModel):
     id: str
     title: str
     origin: str
-    status: str
     file_path: str = ""
     snippet: str = ""
 
@@ -50,7 +49,6 @@ class SearchResult(_DatedModel):
     node_id: str
     title: str
     origin: str
-    status: str
     score: float              # raw RRF score (do NOT normalize)
     vec_distance: float | None = None  # raw cosine distance from best chunk
     snippet: str = ""
@@ -62,7 +60,6 @@ class NodeDetail(_DatedModel):
     file_path: str
     title: str
     origin: str
-    status: str
     created_at: str  # required for detail view (override parent's optional)
     body: str
     word_count: int = 0

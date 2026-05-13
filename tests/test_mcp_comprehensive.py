@@ -41,7 +41,6 @@ origin: note
 title: "Test Concept Alpha"
 created_at: 2026-01-01
 updated_at: 2026-01-15
-status: developing
 tags:
   - ai
   - memory
@@ -69,7 +68,6 @@ origin: webpage
 title: "Test Paper Alpha"
 created_at: 2026-01-01
 updated_at: 2026-04-01
-status: developing
 sentiment: enthusiastic
 tags:
   - ai
@@ -96,7 +94,6 @@ origin: note
 title: "Test Concept Beta"
 created_at: 2026-02-01
 updated_at: 2026-03-01
-status: seed
 tags:
   - ai
   - context
@@ -122,7 +119,6 @@ origin: webpage
 title: "Test Paper Beta"
 created_at: 2026-02-01
 updated_at: 2026-02-15
-status: developing
 sentiment: critical
 tags:
   - ai
@@ -146,7 +142,6 @@ origin: note
 title: "Test Tool Entity"
 created_at: 2026-01-01
 updated_at: 2026-02-01
-status: developing
 tags:
   - memory
   - tool
@@ -166,7 +161,6 @@ origin: meta
 title: "Test Wiki Index"
 created_at: 2026-01-01
 updated_at: 2026-04-01
-status: developing
 related: []
 ---
 
@@ -318,7 +312,7 @@ class TestKbFindSearch:
     def test_result_has_required_fields(self, mcp_sandbox):
         results = kb_find(query="memory", limit=5)
         r = results[0]
-        for field in ("node_id", "title", "origin", "score", "snippet", "status", "updated_at"):
+        for field in ("node_id", "title", "origin", "score", "snippet", "updated_at"):
             assert field in r, f"Missing field: {field}"
 
     def test_bm25_mode(self, mcp_sandbox):
@@ -381,7 +375,7 @@ class TestKbFindGet:
 
     def test_get_returns_metadata(self, mcp_sandbox):
         r = kb_find(id="test-concept-alpha")
-        assert r["status"] == "developing"
+        assert r["origin"] == "note"
         assert r["created_at"] == "2026-01-01"
         assert r["updated_at"] == "2026-01-15"
 
@@ -440,11 +434,6 @@ class TestKbFindList:
         results = kb_find(tag="memory")
         assert len(results) >= 2
 
-    def test_list_by_status_seed(self, mcp_sandbox):
-        results = kb_find(status="seed")
-        assert len(results) >= 1
-        assert all(r["status"] == "seed" for r in results)
-
     def test_list_sort_title(self, mcp_sandbox):
         results = kb_find(origin="note", sort="title")
         titles = [r["title"] for r in results]
@@ -455,7 +444,7 @@ class TestKbFindList:
 
     def test_list_result_structure(self, mcp_sandbox):
         r = kb_find(origin="note", limit=1)[0]
-        for field in ("id", "title", "origin", "status", "updated_at"):
+        for field in ("id", "title", "origin", "updated_at"):
             assert field in r
 
     def test_no_params_returns_list(self, mcp_sandbox):
@@ -557,7 +546,8 @@ class TestKbSaveCreate:
             assert "origin: webpage" in content
             assert 'title: "Frontmatter Check"' in content
             assert f"created_at: {date.today().isoformat()}" in content
-            assert "status: seed" in content
+            # status field has been retired; new pages must NOT emit it.
+            assert "status:" not in content
             assert "related: []" in content
         finally:
             _cleanup_added_page("frontmatter-check")
@@ -672,22 +662,12 @@ class TestKbSaveFrontmatterUpdate:
         """Not passing tags at all leaves them unchanged."""
         try:
             kb_save(title="FM Omit Tags", origin="note", body="Body.", tags=["keep-me"])
-            r = kb_save(id="fm-omit-tags", status="developing")
+            r = kb_save(id="fm-omit-tags", sentiment="neutral")
             assert "error" not in r
             content = (config.WIKI_DIR / "fm-omit-tags.md").read_text()
             assert "- keep-me" in content
         finally:
             _cleanup_added_page("fm-omit-tags")
-
-    def test_update_status(self, mcp_sandbox):
-        try:
-            kb_save(title="Status Update Test", origin="note", body="Body.")
-            r = kb_save(id="status-update-test", status="developing")
-            assert "error" not in r
-            content = (config.WIKI_DIR / "status-update-test.md").read_text()
-            assert "status: developing" in content
-        finally:
-            _cleanup_added_page("status-update-test")
 
     def test_replace_related(self, mcp_sandbox):
         """related=[...] replaces the related list."""
@@ -1265,7 +1245,7 @@ class TestKbFindDateFilters:
 
         Mirrors the canonical question that surfaced the dispatch bug in the
         live Claude.ai session: it requires bare browse mode (no query, no
-        origin/tag/status), a created_after filter relative to today, sort
+        origin/tag filter), a created_after filter relative to today, sort
         by created_at, and relative-time rendering. All in one call.
         """
         from datetime import date, timedelta
@@ -1279,7 +1259,7 @@ class TestKbFindDateFilters:
             last_week = (today - timedelta(days=7)).isoformat()
 
             # Exactly the call shape "what did I add last week?" should produce:
-            # no id, no query, no origin/tag/status — just a date filter + sort.
+            # no id, no query, no origin/tag — just a date filter + sort.
             results = kb_find(created_after=last_week, sort="created_at", limit=20)
 
             assert isinstance(results, list), \
@@ -1323,7 +1303,6 @@ class TestLegacyBriefingDateFallback:
             ---
             title: Legacy Briefing Fallback Test
             origin: webpage
-            status: seed
             ingested_via: notion_briefing
             briefing_date: 2026-03-28
             related: []

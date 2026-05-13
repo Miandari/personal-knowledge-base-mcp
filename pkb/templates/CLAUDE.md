@@ -23,7 +23,6 @@ Personal knowledge base powered by pkb-mcp. See the [pkb-mcp README](https://git
 ```yaml
 title: "Page title"
 origin: note              # webpage|paper|conversation|note|book|transcript|meta
-status: seed              # seed|developing|mature|evergreen
 ingested_via: manual      # manual|claude_code|claude_ui|notion_briefing|web_fetch|youtube_mcp
 aliases:
   - "Alternative Name"

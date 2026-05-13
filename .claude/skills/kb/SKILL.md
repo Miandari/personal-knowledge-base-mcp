@@ -70,7 +70,7 @@ When the user says "add this", "ingest this", or provides content to file:
 | `kb_search` | Direct search (skip explore when user wants raw results) |
 | `kb_explore` | **Default entry point** — structured exploration with staleness |
 | `kb_get` | Fetch full page content for reading or compilation |
-| `kb_list` | Browse by type, tag, or status (not search) |
+| `kb_list` | Browse by type or tag (not search) |
 | `kb_add` | Create a new page (file + index) |
 | `kb_synthesize` | Get a compilation prompt (does NOT call an LLM) |
 | `kb_reindex` | Refresh index after file edits |

@@ -34,7 +34,7 @@ When the user wants to modify an existing page:
 1. Retrieve the current page with `kb_find(id="page-slug")`
 2. Make the change:
    - Update a section: `kb_save(id="...", section="Summary", body="new content")`
-   - Update metadata: `kb_save(id="...", tags=["a", "b"], status="developing")`
+   - Update metadata: `kb_save(id="...", tags=["a", "b"], related=["page-id"])`
    - Replace full body: `kb_save(id="...", body="new full body")`
 3. Metadata updates **replace** the field — pass the complete desired list
 
@@ -44,7 +44,10 @@ When the user wants to modify an existing page:
 |---|---|
 | `kb_find(query=...)` | Search the KB for a topic |
 | `kb_find(id=...)` | Get full page content + metadata + edges |
-| `kb_find(origin=...)` | Browse pages by origin, tag, or status |
+| `kb_find(origin=...)` | Browse pages by origin or tag |
+| `kb_find(sort="created_at", limit=N)` | "What did I add recently?" |
+| `kb_find(created_after="...")` | Filter by when you added pages |
+| `kb_find(published_after="...")` | Filter by source's own pub date |
 | `kb_save(title=..., origin=..., body=...)` | Create a new page |
 | `kb_save(id=..., section=..., body=...)` | Update a section of an existing page |
 | `kb_save(id=..., tags=[...])` | Update metadata (replace semantics) |

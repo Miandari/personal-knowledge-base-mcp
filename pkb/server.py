@@ -233,7 +233,6 @@ def kb_find(
     id: str = "",
     origin: str | None = None,
     tag: str | None = None,
-    status: str | None = None,
     sentiment: str | None = None,
     created_after: str = "",
     created_before: str = "",
@@ -282,11 +281,11 @@ def kb_find(
             return [r.model_dump() for r in results]
 
         # Browse — neither id nor query was given. List pages by sort + any
-        # filters (origin/tag/status/date) or just return the N most recent.
+        # filters (origin / tag / date) or just return the N most recent.
         # "What's in my wiki?" / "what did I add last week?" route here.
         nodes = list_nodes(
             conn,
-            origin_filter=origin, tag_filter=tag, status_filter=status,
+            origin_filter=origin, tag_filter=tag,
             created_after=created_after_norm,
             created_before=created_before_norm,
             published_after=published_after_norm,
@@ -310,7 +309,6 @@ def kb_save(
     related: list[str] | None = None,
     source_url: str = "",
     sentiment: str = "",
-    status: str = "",
     published_at: str = "",
     ingested_via: str = "manual",
 ) -> dict:
@@ -337,7 +335,7 @@ def kb_save(
         return _update_page(
             node_id=id, body=body, section=section,
             tags=tags, sources=sources, related=related,
-            source_url=source_url, sentiment=sentiment, status=status,
+            source_url=source_url, sentiment=sentiment,
             published_at=published_at,
         )
 
@@ -402,7 +400,6 @@ def _create_page(
         "---",
         f'title: "{title}"',
         f"origin: {origin}",
-        "status: seed",
     ]
     if ingested_via:
         fm_lines.append(f"ingested_via: {ingested_via}")
@@ -495,7 +492,6 @@ def _update_page(
     related: list[str] | None = None,
     source_url: str = "",
     sentiment: str = "",
-    status: str = "",
     published_at: str = "",
 ) -> dict:
     """Update an existing page (section, body, frontmatter, or reindex-only)."""
@@ -509,7 +505,7 @@ def _update_page(
 
         has_body = bool(body)
         has_metadata = (tags is not None or sources is not None or related is not None
-                        or source_url or sentiment or status or published_at)
+                        or source_url or sentiment or published_at)
 
         if has_body and section:
             # Section update
@@ -535,7 +531,7 @@ def _update_page(
             content = fp.read_text(encoding="utf-8")
             content = _apply_frontmatter_updates(
                 content, tags=tags, sources=sources, related=related,
-                source_url=source_url, sentiment=sentiment, status=status,
+                source_url=source_url, sentiment=sentiment,
                 published_at=published_at,
             )
             fp.write_text(content, encoding="utf-8")
@@ -557,7 +553,6 @@ def _apply_frontmatter_updates(
     related: list[str] | None = None,
     source_url: str = "",
     sentiment: str = "",
-    status: str = "",
     published_at: str = "",
 ) -> str:
     """Update frontmatter fields in a markdown file's content string."""
@@ -571,8 +566,6 @@ def _apply_frontmatter_updates(
 
     # Update scalar fields. Skip emission when value is empty so we never
     # write `field: ` (omit-rather-than-empty rule).
-    if status:
-        lines = _set_fm_scalar(lines, "status", status)
     if sentiment:
         lines = _set_fm_scalar(lines, "sentiment", sentiment)
     if source_url:

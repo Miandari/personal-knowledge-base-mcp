@@ -148,7 +148,7 @@ class TestSandboxIngestion:
         sandbox.write_wiki(
             "test-article.md",
             "---\norigin: webpage\ntitle: Test Article\ncreated_at: 2026-04-11\n"
-            "updated_at: 2026-04-11\nstatus: seed\ntags:\n  - test\n---\n\n# Test\n\nBody.\n",
+            "updated_at: 2026-04-11\ntags:\n  - test\n---\n\n# Test\n\nBody.\n",
         )
         assert sandbox.wiki_exists("test-article.md")
 
@@ -157,7 +157,7 @@ class TestSandboxIngestion:
         sandbox.write_wiki(
             "test-concept.md",
             "---\norigin: note\ntitle: Test Concept\ncreated_at: 2026-04-11\n"
-            "updated_at: 2026-04-11\nstatus: seed\ntags:\n  - test\n---\n\n"
+            "updated_at: 2026-04-11\ntags:\n  - test\n---\n\n"
             "# Test Concept\n\nThis is about banana quantum computing.\n",
         )
         sandbox.reindex()

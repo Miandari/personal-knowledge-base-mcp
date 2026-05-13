@@ -12,7 +12,6 @@ Every page, no exceptions:
 ---
 title: "Human-Readable Title"
 origin: note                    # webpage|paper|conversation|note|book|transcript|meta
-status: developing              # seed|developing|mature|evergreen
 tags:
   - topic-tag
 related:
@@ -32,12 +31,6 @@ updated_at: 2026-05-05
 - `book`: book summaries or excerpts
 - `transcript`: video/audio transcripts (YouTube, podcasts)
 - `meta`: structural pages (index, log)
-
-**status values:**
-- `seed`: exists, barely populated
-- `developing`: has real content, not yet complete
-- `mature`: comprehensive, well-linked
-- `evergreen`: unlikely to need updates
 
 ## Optional Fields
 

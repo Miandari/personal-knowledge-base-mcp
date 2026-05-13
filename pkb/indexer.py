@@ -365,7 +365,6 @@ class Indexer:
 
         title = str(fm.get("title", ""))
         origin = str(fm.get("origin") or fm.get("type", "meta"))
-        status = str(fm.get("status", "seed"))
         # Normalize created/updated through parse_date so YAML int / date /
         # datetime / "2024-03-15T10:30:00Z" all collapse to YYYY-MM-DD.
         # Store pd.start, never the raw, so lex comparisons in WHERE clauses are honest.
@@ -390,19 +389,18 @@ class Indexer:
         aliases = fm.get("aliases") or []
 
         self.conn.execute("""
-            INSERT INTO nodes (id, file_path, title, origin, status, created_at, updated_at,
+            INSERT INTO nodes (id, file_path, title, origin, created_at, updated_at,
                                sentiment, complexity, confidence,
                                ingested_via,
                                published_at, published_at_start,
                                published_at_end, published_at_precision,
                                url, author,
                                body, word_count, file_hash, indexed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 file_path = excluded.file_path,
                 title = excluded.title,
                 origin = excluded.origin,
-                status = excluded.status,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at,
                 sentiment = excluded.sentiment,
@@ -420,7 +418,7 @@ class Indexer:
                 file_hash = excluded.file_hash,
                 indexed_at = excluded.indexed_at
         """, (
-            node_id, rel_path, title, origin, status, created_at, updated_at,
+            node_id, rel_path, title, origin, created_at, updated_at,
             fm.get("sentiment"),
             fm.get("complexity"), fm.get("confidence"),
             fm.get("ingested_via"),
