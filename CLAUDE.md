@@ -24,9 +24,20 @@ This is the **software repo**, not a vault. Personal wiki content lives in a sep
 
 - `pkb/` — Python package (server, indexer, search, models, schema)
 - `pkb/templates/` — vault scaffolding, copied by `pkb init`
-- `tests/` — test suite (212 tests, sandbox-based)
+- `tests/` — test suite (sandbox-based; run `pytest tests/` for the count)
 - `tests/fixtures/sample_vault/` — sample vault with 17 pages (test fixture + demo)
 - `scripts/` — migration and utility scripts
+- `bench/` — **the cost model behind the pull-vs-eager design claim.** `measure.py`
+  gets real unit costs from a live vault via actual Voyage + Claude calls; `sim.py`
+  models cumulative cost both ways (`measure | simulate | test`); outputs land in
+  `unit_costs.json`, `results.csv`, and two PNGs. Headline: synthesis costs ~880×
+  an embedding ($0.0598 vs $0.0000681/page), so over 90 days eager runs $94.29
+  against $0.84–$16.19 for pull depending on exploration rate. Honest about its
+  own soft spots — `K` is an assumption and `r` is hardcoded at 0.3, both stated in
+  `unit_costs.json`. Measured 2026-04-14 on a 17-page corpus; re-measuring against
+  today's larger vault would let `r` be derived rather than assumed. `pytest
+  bench/test_sim.py` (4 tests) is **not** part of `pytest tests/`.
+  Optional deps: `pip install -e ".[bench]"`.
 
 ## Key concepts
 
