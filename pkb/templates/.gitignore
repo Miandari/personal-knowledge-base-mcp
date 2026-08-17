@@ -1,10 +1,8 @@
 # Secrets
 .env
 
-# SQLite database (derived, rebuildable from markdown)
-pkb.db
-pkb.db-wal
-pkb.db-shm
+# SQLite database + backups (derived, rebuildable from markdown)
+pkb.db*
 
 # Python
 __pycache__/

@@ -79,8 +79,35 @@ def cmd_status(args):
     print(f"Stale:      {status.stale_count}")
     print(f"Orphans:    {status.orphan_chunks}")
     print(f"Origins:    {json.dumps(status.origins)}")
+    print(f"Versioned:  {_git_health(config.VAULT_ROOT)}")
 
     conn.close()
+
+
+def _git_health(vault_root) -> str:
+    """One-line version-control state for `pkb status`.
+
+    The vault ships git-dependent hooks that fail open — if the repo is missing
+    they simply do nothing, forever, without a word. That is how this vault sat
+    unversioned for months while its docs drifted from the tool. Surfacing the
+    inert case here is the cheap antidote: an unarmed safety net should say so.
+    """
+    import subprocess
+    from pathlib import Path
+
+    root = Path(vault_root)
+    if not (root / ".git").exists():
+        return "NO — not a git repo, so the auto-commit hooks are inert (`git init`)"
+    try:
+        dirty = subprocess.run(["git", "status", "--porcelain"], cwd=root,
+                               capture_output=True, text=True, timeout=15).stdout.split("\n")
+        n = len([ln for ln in dirty if ln.strip()])
+        count = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=root,
+                               capture_output=True, text=True, timeout=15).stdout.strip()
+        commits = f"{count} commits" if count else "no commits yet"
+        return f"yes — {commits}" + (f", {n} uncommitted change(s)" if n else ", clean")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return "unknown — git unavailable"
 
 
 def cmd_search(args):
@@ -223,13 +250,48 @@ def cmd_init(args):
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(templates_dir, dest, dirs_exist_ok=True)
 
+    git_msg = _init_git(dest) if not args.no_git else "skipped (--no-git)"
+
     print(f"Vault initialized at {dest}")
+    print(f"Version control: {git_msg}")
     print()
     print("Next steps:")
     print(f"  1. cd {dest}")
     print(f"  2. Copy .env.example to .env and set your VOYAGE_API_KEY")
     print(f"  3. pkb rebuild")
     print(f"  4. Connect your MCP client (see .claude/settings.json)")
+
+
+def _init_git(dest: Path) -> str:
+    """Put a freshly scaffolded vault under git.
+
+    The scaffold ships a .gitignore and two git-dependent hooks (auto-commit on
+    Write|Edit, and an uncommitted-changes warning on Stop). Both are guarded by
+    `[ -d .git ]`, so without this step a new vault is born with complete but
+    permanently inert versioning — which is exactly how the original vault spent
+    three months drifting with no record of when or why. Scaffolding the machinery
+    and not switching it on is worse than not shipping it.
+    """
+    import subprocess
+
+    if (dest / ".git").exists():
+        return "already a git repo — left alone"
+    try:
+        subprocess.run(["git", "init", "-q"], cwd=dest, check=True,
+                       capture_output=True, timeout=30)
+        subprocess.run(["git", "add", "-A"], cwd=dest, check=True,
+                       capture_output=True, timeout=30)
+        subprocess.run(["git", "commit", "-q", "-m", "Initial commit: pkb vault"],
+                       cwd=dest, check=True, capture_output=True, timeout=30)
+        return "git repo initialized, initial commit made"
+    except FileNotFoundError:
+        return "git not found on PATH — vault is NOT versioned (hooks will no-op)"
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or b"").decode().strip().splitlines()
+        hint = detail[-1] if detail else f"exit {e.returncode}"
+        return f"git init failed ({hint}) — vault is NOT versioned"
+    except subprocess.TimeoutExpired:
+        return "git timed out — vault is NOT versioned"
 
 
 def main():
@@ -241,6 +303,8 @@ def main():
     # init
     p_init = subparsers.add_parser("init", help="Initialize a new vault")
     p_init.add_argument("path", nargs="?", default=".", help="Directory to initialize (default: .)")
+    p_init.add_argument("--no-git", action="store_true",
+                        help="Skip git init (the vault's auto-commit hooks will then no-op)")
     p_init.set_defaults(func=cmd_init)
 
     # rebuild

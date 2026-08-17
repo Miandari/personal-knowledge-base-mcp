@@ -73,15 +73,49 @@ updated_at: 2026-05-05
 ## CLI
 
 ```bash
-pkb init ~/my-vault                              # scaffold a new vault
+pkb init ~/my-vault [--no-git]                    # scaffold a new vault (git init by default)
 pkb --vault ~/my-vault rebuild [--force]          # rebuild index
-pkb --vault ~/my-vault status                     # check health
-pkb --vault ~/my-vault search "query"             # test search
+pkb --vault ~/my-vault status                     # check health (incl. version-control state)
+pkb --vault ~/my-vault search "query"             # search
 pkb --vault ~/my-vault server                     # start MCP server (stdio)
 pkb --vault ~/my-vault server --transport http     # HTTP transport
 ```
 
+`search` (alias `find`) mirrors the `kb_find` tool exactly — both call `search.find()`,
+so neither surface can drift ahead of the other. Omit the query to browse:
+
+```bash
+pkb search --tag agent-memory --sort created_at   # browse by filters, no query
+pkb search "retrieval" --origin paper --created-after 2026-06
+pkb search --id agent-memory                       # one page by id
+```
+
+Filters: `--origin --tag --sentiment --created-after/before --published-after/before
+--sort --limit --mode`. Dates take `YYYY`, `YYYY-MM`, or `YYYY-MM-DD` and error rather
+than being dropped. **Any new retrieval behaviour goes in `search.find()`, not in a
+caller** — the CLI fell three features behind the MCP tool precisely because the
+dispatch was duplicated.
+
 Vault discovery: `--vault` CLI arg > `PKB_VAULT_ROOT` env var > current directory.
+Prefer `--vault` over `cd` in scripts and hooks.
+
+## Vault versioning
+
+`pkb init` runs `git init` plus an initial commit. This is not a nicety: the scaffold
+ships two git-dependent hooks (`hooks/hooks.json`) that are guarded by `[ -d .git ]`
+and therefore **fail open** — in a non-repo vault they no-op silently and forever.
+Shipping the machinery without arming it is how a vault drifts for months with no
+record. `pkb status` prints a `Versioned:` line so the unarmed state is visible.
+
+When touching this area, keep three invariants:
+
+- `.gitignore` must exclude `.env` and `pkb.db*`. The glob matters — migration backups
+  land as `pkb.db.bak-*` and are multi-megabyte binaries.
+- The auto-commit hook must not name a path that may not exist. It previously ran
+  `git add wiki/ .raw/`, which exits 128 when `.raw/` is absent, aborting the `&&`
+  chain before the commit. Use `git add -A`.
+- Version config, not just content. The drift that motivated all of this was in
+  `CLAUDE.md`, `_templates/`, and `.claude/skills/` — never in `wiki/`.
 
 ## MCP client configuration
 

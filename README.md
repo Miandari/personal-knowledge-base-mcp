@@ -91,7 +91,34 @@ cp .env.example .env
 pkb rebuild
 ```
 
-`pkb init` scaffolds everything: wiki directory, Obsidian config, Claude Code skills, auto-commit hooks, and a starter index page. If you skip this step and try to use the MCP tools, they'll return clear setup instructions.
+`pkb init` scaffolds everything: wiki directory, Obsidian config, Claude Code skills, auto-commit hooks, and a starter index page. It also runs `git init` and makes an initial commit — pass `--no-git` to skip. If you skip this step and try to use the MCP tools, they'll return clear setup instructions.
+
+### Versioning
+
+The vault is a git repo, and that is load-bearing rather than optional.
+
+Markdown is the source of truth and the index is disposable, so git is the only
+durable record of *how the knowledge changed* — and, more usefully, **why**. A page
+whose claim you no longer trust, a schema field you cannot remember the purpose of,
+a config that quietly stopped matching the tool: all of these are answerable with
+`git log` and unanswerable without it.
+
+Two hooks keep it current without ceremony (`hooks/hooks.json`):
+
+| Hook | Does |
+|---|---|
+| `PostToolUse` on `Write`/`Edit` | `git add -A` and commit as `vault: auto-commit <timestamp>` |
+| `Stop` | If `wiki/` changed this session, prompt for a `wiki/hot.md` refresh |
+
+Both are guarded by `[ -d .git ]` and fail open — in a vault that is not a git repo
+they do nothing, silently and forever. That is why `init` arms them. `pkb status`
+reports the state on its `Versioned:` line so an unarmed net is visible rather than
+assumed.
+
+`.gitignore` excludes `.env`, `pkb.db*` (index and migration backups — derived and
+large), and Obsidian workspace state. Everything else is tracked, including
+`CLAUDE.md`, `_templates/`, and `.claude/` — config drift is the failure mode this
+is guarding against, so config belongs under version control alongside content.
 
 ### Connect an LLM client
 
