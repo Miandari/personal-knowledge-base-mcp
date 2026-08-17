@@ -42,7 +42,6 @@ This is the **software repo**, not a vault. Personal wiki content lives in a sep
 ```yaml
 title: "Page title"
 origin: note
-status: developing
 ingested_via: manual
 aliases:
   - "Old Name"

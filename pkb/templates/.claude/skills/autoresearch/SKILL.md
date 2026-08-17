@@ -83,7 +83,6 @@ updated: YYYY-MM-DD
 tags:
   - research
   - [topic-tag]
-status: developing
 related:
   - "[[Every page created in this session]]"
 sources:

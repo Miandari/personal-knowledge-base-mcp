@@ -166,7 +166,6 @@ related:
   - "[[Page referenced in answer]]"
 sources:
   - "[[wiki/sources/relevant-source.md]]"
-status: developing
 ---
 ```
 

@@ -40,7 +40,6 @@ title: "Lint Report YYYY-MM-DD"
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 tags: [meta, lint]
-status: developing
 ---
 
 # Lint Report: YYYY-MM-DD

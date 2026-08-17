@@ -235,7 +235,6 @@ Frontmatter for `wiki/concepts/` notes:
 ```yaml
 ---
 type: concept          # concept | character | theme | chapter | synthesis
-status: developing     # stub | developing | mature
 source_chapters: []
 first_appearance: ""
 tags: [concept]

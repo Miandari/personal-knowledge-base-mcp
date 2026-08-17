@@ -97,7 +97,6 @@ updated: 2026-04-08
 tags:
   - tag-one                      # list items use - format
   - tag-two
-status: developing
 related:
   - "[[Other Note]]"             # wikilinks must be quoted in YAML
 sources:

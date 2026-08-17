@@ -65,7 +65,6 @@ created: YYYY-MM-DD
 updated: YYYY-MM-DD
 tags:
   - <relevant-tag>
-status: developing
 related:
   - "[[Any Wiki Page Mentioned]]"
 sources:

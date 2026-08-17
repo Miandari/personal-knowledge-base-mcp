@@ -1,7 +1,6 @@
 ---
 title: Wiki index
 origin: meta
-status: developing
 tags:
   - meta
 created_at: 2026-01-01

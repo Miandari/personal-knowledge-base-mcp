@@ -9,7 +9,6 @@ created_at: <% tp.date.now("YYYY-MM-DD") %>
 updated_at: <% tp.date.now("YYYY-MM-DD") %>
 tags:
   -
-status: seed
 related: []
 sources: []
 ---
