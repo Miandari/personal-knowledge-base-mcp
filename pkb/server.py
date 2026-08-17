@@ -17,22 +17,9 @@ from .indexer import Indexer, parse_markdown, file_md5, slug_from_path
 from .models import NodeSummary, SearchResult, NodeDetail, StatusResult
 from .search import (
     hybrid_search, fts_search, get_node, get_node_summary,
-    list_nodes, get_status,
+    list_nodes, get_status, find as _find,
 )
-
-
-def _normalize_filter_date(name: str, raw: str) -> str | None:
-    """Validate a user-supplied date filter param. Raises ValueError on garbage.
-    Returns the normalized YYYY-MM-DD string, or None if input was empty."""
-    if not raw:
-        return None
-    pd = parse_date(raw)
-    if pd is None:
-        raise ValueError(
-            f"Invalid date for {name}: {raw!r}. "
-            f"Expected YYYY, YYYY-MM, or YYYY-MM-DD."
-        )
-    return pd.start
+from .dates import normalize_filter_date as _normalize_filter_date
 
 mcp = FastMCP("pkb", instructions="""\
 Personal knowledge base tools. These access the user's PERSONAL wiki — \
@@ -242,57 +229,29 @@ def kb_find(
     sort: str = "updated_at",
     limit: int = 10,
 ) -> dict | list[dict] | None:
-    """Find and retrieve pages from the personal wiki."""
-    # Validate date filter inputs up front — raise so MCP surfaces a clean
-    # tool error with the descriptive message, rather than silently skipping.
-    created_after_norm = _normalize_filter_date("created_after", created_after)
-    created_before_norm = _normalize_filter_date("created_before", created_before)
-    published_after_norm = _normalize_filter_date("published_after", published_after)
-    published_before_norm = _normalize_filter_date("published_before", published_before)
+    """Find and retrieve pages from the personal wiki.
 
+    Dispatch and filtering live in search.find(), shared with the `pkb search`
+    CLI so the two surfaces can't drift. Date validation raises ValueError,
+    which MCP surfaces as a clean tool error rather than silently ignoring
+    a malformed filter.
+    """
     conn = _get_conn()
     try:
-        # Get by ID
-        if id:
-            detail = get_node(conn, id)
-            return detail.model_dump() if detail else None
-
-        # Search by query
-        if query:
-            filters: dict = {}
-            if origin:
-                filters["origin"] = origin
-            if sentiment:
-                filters["sentiment"] = sentiment
-            if created_after_norm:
-                filters["created_after"] = created_after_norm
-            if created_before_norm:
-                filters["created_before"] = created_before_norm
-            if published_after_norm:
-                filters["published_after"] = published_after_norm
-            if published_before_norm:
-                filters["published_before"] = published_before_norm
-
-            if mode == "bm25":
-                results = fts_search(conn, query, limit=limit, filters=filters)
-            else:
-                provider = _get_provider(conn)
-                results = hybrid_search(conn, query, limit=limit, filters=filters, embedding_provider=provider)
-            return [r.model_dump() for r in results]
-
-        # Browse — neither id nor query was given. List pages by sort + any
-        # filters (origin / tag / date) or just return the N most recent.
-        # "What's in my wiki?" / "what did I add last week?" route here.
-        nodes = list_nodes(
+        result = _find(
             conn,
-            origin_filter=origin, tag_filter=tag,
-            created_after=created_after_norm,
-            created_before=created_before_norm,
-            published_after=published_after_norm,
-            published_before=published_before_norm,
-            sort=sort, limit=limit,
+            query=query, id=id,
+            origin=origin, tag=tag, sentiment=sentiment,
+            created_after=created_after, created_before=created_before,
+            published_after=published_after, published_before=published_before,
+            mode=mode, sort=sort, limit=limit,
+            embedding_provider=(_get_provider(conn) if (query and mode != "bm25") else None),
         )
-        return [n.model_dump() for n in nodes]
+        if result is None:
+            return None
+        if isinstance(result, list):
+            return [r.model_dump() for r in result]
+        return result.model_dump()
     finally:
         conn.close()
 

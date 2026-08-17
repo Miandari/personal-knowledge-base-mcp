@@ -160,3 +160,20 @@ def relative_time(start: str | None, precision: str | None,
     if delta < 365:
         return d_start.strftime("%b %Y")
     return f"{d_start.year}"
+
+
+def normalize_filter_date(name: str, raw: str | None) -> str | None:
+    """Validate a user-supplied date filter param. Raises ValueError on garbage.
+    Returns the normalized YYYY-MM-DD string, or None if input was empty.
+
+    Shared by the MCP tool and the CLI so both accept identical date syntax.
+    """
+    if not raw:
+        return None
+    pd = parse_date(raw)
+    if pd is None:
+        raise ValueError(
+            f"Invalid date for {name}: {raw!r}. "
+            f"Expected YYYY, YYYY-MM, or YYYY-MM-DD."
+        )
+    return pd.start

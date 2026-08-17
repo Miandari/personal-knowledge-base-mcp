@@ -84,10 +84,14 @@ def cmd_status(args):
 
 
 def cmd_search(args):
-    """Search the index."""
+    """Find pages: by id, by query, or by browsing filters.
+
+    Thin shell over search.find() — the same implementation kb_find uses, so
+    the CLI and the MCP tool always accept the same filters.
+    """
     _load_env()
     from .db import get_connection
-    from .search import hybrid_search, fts_search
+    from .search import find
     from .embeddings import get_provider
 
     if not config.DB_PATH.exists():
@@ -95,35 +99,76 @@ def cmd_search(args):
         sys.exit(1)
 
     conn = get_connection()
+    try:
+        query = args.query or ""
+        needs_embeddings = bool(query) and args.mode != "bm25"
+        try:
+            result = find(
+                conn,
+                query=query, id=args.id or "",
+                origin=args.origin, tag=args.tag, sentiment=args.sentiment,
+                created_after=args.created_after or "",
+                created_before=args.created_before or "",
+                published_after=args.published_after or "",
+                published_before=args.published_before or "",
+                mode=args.mode, sort=args.sort, limit=args.limit,
+                embedding_provider=(get_provider(config.EMBEDDING_PROVIDER, conn=conn)
+                                    if needs_embeddings else None),
+            )
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(2)
 
-    filters = {}
-    if args.origin:
-        filters["origin"] = args.origin
-    if args.sentiment:
-        filters["sentiment"] = args.sentiment
+        if args.json_output:
+            if result is None:
+                print("null")
+            elif isinstance(result, list):
+                print(json.dumps([r.model_dump() for r in result], indent=2, default=str))
+            else:
+                print(json.dumps(result.model_dump(), indent=2, default=str))
+            return
 
-    if args.mode == "bm25":
-        results = fts_search(conn, args.query, limit=args.limit, filters=filters)
-    else:
-        provider = get_provider(config.EMBEDDING_PROVIDER, conn=conn)
-        results = hybrid_search(conn, args.query, limit=args.limit, filters=filters, embedding_provider=provider)
+        _render_find_result(result, by_id=bool(args.id), scored=bool(query))
+    finally:
+        conn.close()
 
-    if args.json_output:
-        print(json.dumps([r.model_dump() for r in results], indent=2))
-    else:
-        if not results:
-            print("No results.")
-        from .dates import relative_time
-        for i, r in enumerate(results, 1):
+
+def _render_find_result(result, by_id: bool, scored: bool):
+    """Human-readable rendering for the three shapes find() can return."""
+    from .dates import relative_time
+
+    if by_id:
+        if result is None:
+            print("Not found.")
+            return
+        print(f"{result.title}  [{result.origin}]")
+        print(f"  id:      {result.id}")
+        print(f"  updated: {result.updated_at}")
+        if getattr(result, "tags", None):
+            print(f"  tags:    {', '.join(result.tags)}")
+        if getattr(result, "body", None):
+            print()
+            print(result.body)
+        return
+
+    if not result:
+        print("No results.")
+        return
+
+    for i, r in enumerate(result, 1):
+        if scored:
             dist_str = f"  vec_dist={r.vec_distance:.4f}" if r.vec_distance is not None else ""
             print(f"{i}. [{r.origin}] {r.title} (score={r.score:.6f}{dist_str})")
-            rel = relative_time(r.updated_at, "day") or "?"
-            print(f"   {r.node_id}  updated={r.updated_at} ({rel})")
-            if r.snippet:
-                print(f"   {r.snippet[:120]}...")
-            print()
-
-    conn.close()
+            node_id = r.node_id
+        else:
+            # Browse listing — no score to show.
+            print(f"{i}. [{r.origin}] {r.title}")
+            node_id = r.id
+        rel = relative_time(r.updated_at, "day") or "?"
+        print(f"   {node_id}  updated={r.updated_at} ({rel})")
+        if r.snippet:
+            print(f"   {r.snippet[:120]}...")
+        print()
 
 
 def cmd_server(args):
@@ -209,13 +254,30 @@ def main():
     p_status = subparsers.add_parser("status", help="Show index health")
     p_status.set_defaults(func=cmd_status)
 
-    # search
-    p_search = subparsers.add_parser("search", help="Search the index")
-    p_search.add_argument("query", help="Search query")
+    # search / find — same surface as the kb_find MCP tool
+    p_search = subparsers.add_parser(
+        "search", aliases=["find"],
+        help="Find pages by query, by id, or by browsing filters",
+        description="Omit the query to browse: `pkb search --origin paper --sort created_at`.",
+    )
+    p_search.add_argument("query", nargs="?", default="",
+                          help="Search query (omit to browse by filters)")
+    p_search.add_argument("--id", help="Fetch one page by id (ignores query/filters)")
     p_search.add_argument("-n", "--limit", type=int, default=10, help="Max results")
     p_search.add_argument("--mode", choices=["hybrid", "bm25"], default="hybrid", help="Search mode")
     p_search.add_argument("--origin", help="Filter by origin (webpage, paper, note, ...)")
+    p_search.add_argument("--tag", help="Filter by tag")
     p_search.add_argument("--sentiment", help="Filter by sentiment")
+    p_search.add_argument("--created-after", dest="created_after",
+                          help="Created on/after YYYY, YYYY-MM, or YYYY-MM-DD")
+    p_search.add_argument("--created-before", dest="created_before",
+                          help="Created before YYYY, YYYY-MM, or YYYY-MM-DD")
+    p_search.add_argument("--published-after", dest="published_after",
+                          help="Published after YYYY, YYYY-MM, or YYYY-MM-DD")
+    p_search.add_argument("--published-before", dest="published_before",
+                          help="Published before YYYY, YYYY-MM, or YYYY-MM-DD")
+    p_search.add_argument("--sort", choices=["updated_at", "created_at", "published_at", "title"],
+                          default="updated_at", help="Sort order when browsing")
     p_search.add_argument("--json", dest="json_output", action="store_true", help="JSON output")
     p_search.set_defaults(func=cmd_search)
 

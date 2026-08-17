@@ -229,14 +229,22 @@ def _fts_search(
     if not fts_query:
         return []
 
-    sql = """
+    # Tag filter needs a JOIN, so it has to be spliced in before WHERE.
+    # tags has PRIMARY KEY (node_id, tag), so the join can't fan out rows.
+    tag_filter = (filters or {}).get("tag")
+    tag_join = " JOIN tags t ON t.node_id = n.id" if tag_filter else ""
+
+    sql = f"""
         SELECT f.node_id
         FROM nodes_fts f
-        JOIN nodes n ON n.id = f.node_id
+        JOIN nodes n ON n.id = f.node_id{tag_join}
         WHERE nodes_fts MATCH ?
     """
     params: list = [fts_query]
 
+    if tag_filter:
+        sql += " AND t.tag = ?"
+        params.append(tag_filter)
     if origin_filter:
         sql += " AND n.origin = ?"
         params.append(origin_filter)
@@ -320,6 +328,19 @@ def _vec_search(
                           ("created_after", "created_before",
                            "published_after", "published_before"))
 
+    # Tag filter: resolve the tag's node set once, then test membership per
+    # candidate. vec0 knn can't JOIN, so this follows the same over-fetch +
+    # post-filter strategy as the date filters above.
+    tag_filter = filters.get("tag")
+    tag_node_ids: set[str] | None = None
+    if tag_filter:
+        tag_node_ids = {
+            r["node_id"] for r in
+            conn.execute("SELECT node_id FROM tags WHERE tag = ?", (tag_filter,))
+        }
+        if not tag_node_ids:
+            return []
+
     try:
         query_embedding = provider.embed([query], input_type="query")[0]
     except Exception:
@@ -329,7 +350,7 @@ def _vec_search(
 
     # Over-fetch: scale with limit, generous floor, no hard ceiling.
     # SQLite handles a few hundred rows trivially on local hardware.
-    k = max(limit * 5, 100) if (has_date_filter or origin_filter or sentiment_filter) else max(limit * 5, 50)
+    k = max(limit * 5, 100) if (has_date_filter or origin_filter or sentiment_filter or tag_filter) else max(limit * 5, 50)
 
     try:
         rows = conn.execute(
@@ -356,6 +377,9 @@ def _vec_search(
             continue
 
         node_id = chunk_row["node_id"]
+
+        if tag_node_ids is not None and node_id not in tag_node_ids:
+            continue
 
         # Apply filters — fetch the node row once if any filter is active
         if origin_filter or sentiment_filter or has_date_filter:
@@ -840,4 +864,80 @@ def get_status(conn) -> StatusResult:
         stale_count=stale,
         orphan_chunks=orphans,
         origins=origins,
+    )
+
+
+# ── Unified find ───────────────────────────────────────────────────────
+# Single implementation behind both the MCP tool (kb_find) and the CLI
+# (`pkb search`). Previously each had its own copy of this dispatch, and the
+# CLI silently fell behind — it never grew the tag/date/sort filters or the
+# browse path. Keep new retrieval behaviour here, not in the callers.
+
+def find(
+    conn,
+    query: str = "",
+    id: str = "",
+    origin: str | None = None,
+    tag: str | None = None,
+    sentiment: str | None = None,
+    created_after: str = "",
+    created_before: str = "",
+    published_after: str = "",
+    published_before: str = "",
+    mode: str = "hybrid",
+    sort: str = "updated_at",
+    limit: int = 10,
+    embedding_provider: EmbeddingProvider | None = None,
+) -> NodeDetail | list[SearchResult] | list[NodeSummary] | None:
+    """Find pages by id, by query, or by browsing filters.
+
+    Dispatch, in order:
+      * `id` given      -> NodeDetail for that page (or None)
+      * `query` given   -> list[SearchResult], ranked; honours all filters
+      * neither         -> list[NodeSummary], filtered + sorted ("what's in
+                           my wiki?", "what did I add last week?")
+
+    Date params accept YYYY, YYYY-MM, or YYYY-MM-DD and raise ValueError on
+    anything else, so callers surface one consistent error message.
+    """
+    from .dates import normalize_filter_date
+
+    created_after_n = normalize_filter_date("created_after", created_after)
+    created_before_n = normalize_filter_date("created_before", created_before)
+    published_after_n = normalize_filter_date("published_after", published_after)
+    published_before_n = normalize_filter_date("published_before", published_before)
+
+    if id:
+        return get_node(conn, id)
+
+    if query:
+        filters: dict = {}
+        if origin:
+            filters["origin"] = origin
+        if tag:
+            filters["tag"] = tag
+        if sentiment:
+            filters["sentiment"] = sentiment
+        if created_after_n:
+            filters["created_after"] = created_after_n
+        if created_before_n:
+            filters["created_before"] = created_before_n
+        if published_after_n:
+            filters["published_after"] = published_after_n
+        if published_before_n:
+            filters["published_before"] = published_before_n
+
+        if mode == "bm25":
+            return fts_search(conn, query, limit=limit, filters=filters)
+        return hybrid_search(conn, query, limit=limit, filters=filters,
+                             embedding_provider=embedding_provider)
+
+    return list_nodes(
+        conn,
+        origin_filter=origin, tag_filter=tag,
+        created_after=created_after_n,
+        created_before=created_before_n,
+        published_after=published_after_n,
+        published_before=published_before_n,
+        sort=sort, limit=limit,
     )
