@@ -413,3 +413,102 @@ class TestLinkEdgesSampleVault:
     def test_page_with_only_body_links_is_connected(self, sandbox):
         # related: [] and sources: [], so body links are its only possible edges
         assert {"graphrag", "raptor"} <= self._links(sandbox.conn, "demand-driven-compilation")
+
+
+class TestRebuildRefreshesEdges:
+    """A plain rebuild keeps edges right for pages whose own file did not change."""
+
+    @staticmethod
+    def _write(wiki, name, title, body):
+        (wiki / name).write_text(
+            f"---\norigin: note\ntitle: {title}\ncreated_at: 2026-04-12\n---\n\n# {title}\n\n{body}\n"
+        )
+
+    @staticmethod
+    def _rebuild(conn, wiki):
+        return Indexer(conn, wiki_dir=wiki, embedding_provider=NoopEmbedding()).rebuild()
+
+    @staticmethod
+    def _link(conn, from_id, to_id):
+        return conn.execute(
+            "SELECT 1 FROM edges WHERE from_id = ? AND to_id = ? AND edge_type = 'link'",
+            (from_id, to_id),
+        ).fetchone() is not None
+
+    def test_link_to_page_created_later_resolves(self, tmp_db, tmp_path):
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        self._write(wiki, "linker.md", "Linker", "See [[later-page]].")
+        self._rebuild(tmp_db, wiki)
+        assert not self._link(tmp_db, "linker", "later-page")
+
+        self._write(wiki, "later-page.md", "Later page", "New.")
+        stats = self._rebuild(tmp_db, wiki)
+
+        assert stats["files_skipped"] == 1  # linker.md itself is unchanged
+        assert stats["pages_relinked"] == 1
+        assert self._link(tmp_db, "linker", "later-page")
+
+    def test_link_to_deleted_page_is_dropped(self, tmp_db, tmp_path):
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        self._write(wiki, "linker.md", "Linker", "See [[doomed]].")
+        self._write(wiki, "doomed.md", "Doomed", "Soon gone.")
+        self._rebuild(tmp_db, wiki)
+        assert self._link(tmp_db, "linker", "doomed")
+
+        (wiki / "doomed.md").unlink()
+        stats = self._rebuild(tmp_db, wiki)
+
+        assert stats["files_deleted"] == 1
+        assert not self._link(tmp_db, "linker", "doomed")
+
+    def test_unchanged_vault_rewrites_no_edges(self, tmp_db, tmp_path):
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        self._write(wiki, "a.md", "A", "See [[b]].")
+        self._write(wiki, "b.md", "B", "See [[a]].")
+        self._rebuild(tmp_db, wiki)
+
+        stats = self._rebuild(tmp_db, wiki)
+
+        assert stats["files_skipped"] == 2
+        assert stats["pages_relinked"] == 0
+
+    def test_file_moved_without_changes_stays_indexed(self, tmp_db, tmp_path):
+        wiki = tmp_path / "wiki"
+        (wiki / "concepts").mkdir(parents=True)
+        self._write(wiki / "concepts", "moved.md", "Moved", "Body.")
+        self._rebuild(tmp_db, wiki)
+
+        (wiki / "concepts" / "moved.md").rename(wiki / "moved.md")
+        self._rebuild(tmp_db, wiki)
+
+        row = tmp_db.execute("SELECT file_path FROM nodes WHERE id = 'moved'").fetchone()
+        assert row is not None
+        assert row["file_path"] == "wiki/moved.md"
+
+    def test_page_that_fails_indexing_keeps_its_edges(self, tmp_db, tmp_path):
+        """A page pass 1 rejects keeps its old body, so it must keep its old edges too."""
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        self._write(wiki, "a.md", "A", "See [[b]].")
+        self._write(wiki, "b.md", "B", "Target.")
+        self._write(wiki, "z.md", "Z", "Other target.")
+        self._rebuild(tmp_db, wiki)
+
+        (wiki / "a.md").write_text("---\norigin: note\n---\n\nNow see [[z]].\n")  # title gone
+        stats = self._rebuild(tmp_db, wiki)
+
+        assert any("a.md" in e for e in stats["errors"])
+        assert self._link(tmp_db, "a", "b")
+        assert not self._link(tmp_db, "a", "z")
+
+    def test_file_gone_before_refresh_is_skipped(self, tmp_db, tmp_path):
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        self._write(wiki, "a.md", "A", "Body.")
+        indexer = Indexer(tmp_db, wiki_dir=wiki, embedding_provider=NoopEmbedding())
+        indexer.rebuild()
+
+        indexer._refresh_edges([wiki / "deleted-mid-rebuild.md"])  # must not raise

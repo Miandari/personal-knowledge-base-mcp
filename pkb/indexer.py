@@ -75,11 +75,28 @@ def extract_wikilinks(body: str) -> list[str]:
     return WIKILINK_RE.findall(body)
 
 
-def resolve_wikilink(target: str, resolution_table: dict[str, list[str]]) -> str | None:
+def lowercase_index(resolution_table: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Lowercased key -> ids of the FIRST key with that form, in table order.
+
+    Lets resolve_wikilink make its case-insensitive lookups in O(1) instead of
+    scanning the whole table once per link.
+    """
+    index: dict[str, list[str]] = {}
+    for key, ids in resolution_table.items():
+        index.setdefault(key.lower(), ids)
+    return index
+
+
+def resolve_wikilink(
+    target: str,
+    resolution_table: dict[str, list[str]],
+    lowercase: dict[str, list[str]] | None = None,
+) -> str | None:
     """Resolve a wikilink target to a node ID using the resolution table.
 
     Tries: exact match, alias match, case-insensitive.
-    Returns None if unresolved.
+    Returns None if unresolved. Pass lowercase=lowercase_index(table) when
+    resolving many links against the same table.
     """
     # Normalize: strip .md, strip wiki/ prefix, strip leading/trailing whitespace
     target = target.strip()
@@ -97,11 +114,13 @@ def resolve_wikilink(target: str, resolution_table: dict[str, list[str]]) -> str
         ids = resolution_table[target]
         return ids[0] if len(ids) == 1 else None  # ambiguous → None
 
+    if lowercase is None:
+        lowercase = lowercase_index(resolution_table)
+
     # Try lowercase
-    target_lower = target.lower()
-    for key, ids in resolution_table.items():
-        if key.lower() == target_lower:
-            return ids[0] if len(ids) == 1 else None
+    ids = lowercase.get(target.lower())
+    if ids is not None:
+        return ids[0] if len(ids) == 1 else None
 
     # Legacy: strip path prefix for old-style [[concepts/agent-memory]] links
     if "/" in target:
@@ -109,9 +128,9 @@ def resolve_wikilink(target: str, resolution_table: dict[str, list[str]]) -> str
         if basename in resolution_table:
             ids = resolution_table[basename]
             return ids[0] if len(ids) == 1 else None
-        for key, ids in resolution_table.items():
-            if key.lower() == basename.lower():
-                return ids[0] if len(ids) == 1 else None
+        ids = lowercase.get(basename.lower())
+        if ids is not None:
+            return ids[0] if len(ids) == 1 else None
 
     return None
 
@@ -228,6 +247,8 @@ class Indexer:
         self.provider = embedding_provider
         self.dry_run = dry_run
         self._resolution_table: dict[str, list[str]] = {}
+        self._resolution_lower: dict[str, list[str]] | None = None
+        self._unchanged_files: list[Path] = []
         self.stats = {
             "files_scanned": 0,
             "files_indexed": 0,
@@ -235,6 +256,7 @@ class Indexer:
             "files_deleted": 0,
             "chunks_created": 0,
             "chunks_embedded": 0,
+            "pages_relinked": 0,
             "errors": [],
         }
 
@@ -247,10 +269,17 @@ class Indexer:
         Returns:
             Stats dict with counts of what happened.
         """
-        init_schema(self.conn)
+        if not self.dry_run:
+            init_schema(self.conn)
 
         all_files = self._discover_files()
         self.stats["files_scanned"] = len(all_files)
+
+        # Drop nodes whose files are gone before anything resolves against
+        # them, so no link is pointed at a page that is about to disappear.
+        # Running this first also re-indexes a file that moved without
+        # changing, instead of deleting it as its old path's orphan.
+        self._clean_orphan_nodes(all_files)
 
         # Pass 1: establish nodes
         changed_ids = self._pass1_nodes(all_files, force=force)
@@ -261,10 +290,12 @@ class Indexer:
         # Pass 2: edges + chunks + embeddings
         self._pass2_edges_and_chunks(changed_ids)
 
-        # Finalize: embed, reconcile, clean orphans
+        # Unchanged pages: edges only
+        self._refresh_edges(self._unchanged_files)
+
+        # Finalize: embed, reconcile
         self._finalize_embeddings()
         self._reconcile_orphan_chunks()
-        self._clean_orphan_nodes(all_files)
 
         return self.stats
 
@@ -315,6 +346,7 @@ class Indexer:
     def _pass1_nodes(self, files: list[Path], force: bool = False) -> list[str]:
         """Parse files, upsert nodes + FTS5. Returns list of changed node IDs."""
         changed_ids = []
+        self._unchanged_files = []
 
         for file_path in files:
             node_id = slug_from_path(file_path, self.wiki_dir)
@@ -327,6 +359,7 @@ class Indexer:
                 ).fetchone()
                 if existing and existing["file_hash"] == fhash:
                     self.stats["files_skipped"] += 1
+                    self._unchanged_files.append(file_path)
                     continue
 
             fm, body = parse_markdown(file_path)
@@ -508,6 +541,8 @@ class Indexer:
             if alias_lower != anorm:
                 add(alias_lower, row["node_id"])
 
+        self._resolution_lower = lowercase_index(self._resolution_table)
+
     # ── Pass 2 ─────────────────────────────────────────────────────
 
     def _pass2_edges_and_chunks(self, changed_ids: list[str]) -> None:
@@ -543,14 +578,50 @@ class Indexer:
 
         self.conn.commit()
 
+    def _refresh_edges(self, files: list[Path]) -> None:
+        """Re-extract edges for pages whose files pass 1 found unchanged.
+
+        A page's edges depend on which other pages exist, not only on its own
+        file: a link to a page created after it resolves only now. Parsing
+        and resolution only, no chunking or embedding. Edges are rewritten
+        only where they changed. Pages that failed pass 1 are not in `files`,
+        so their stored body and edges stay consistent.
+        """
+        if self.dry_run:
+            return
+
+        for file_path in files:
+            node_id = slug_from_path(file_path, self.wiki_dir)
+            try:
+                fm, body = parse_markdown(file_path)
+            except FileNotFoundError:
+                continue  # deleted since pass 1; the next rebuild drops its node
+            current = {
+                (r["to_id"], r["edge_type"])
+                for r in self.conn.execute(
+                    "SELECT to_id, edge_type FROM edges WHERE from_id = ?", (node_id,)
+                )
+            }
+            if set(self._edges_for(node_id, fm, body)) != current:
+                self._extract_edges(node_id, fm, body)
+                self.stats["pages_relinked"] += 1
+
     def _extract_edges(self, node_id: str, fm: dict, body: str) -> None:
-        """Extract and store edges from frontmatter and body wikilinks.
+        """Replace this node's stored edges with those from its frontmatter and body."""
+        self.conn.execute("DELETE FROM edges WHERE from_id = ?", (node_id,))
+        for to_id, edge_type in self._edges_for(node_id, fm, body):
+            self.conn.execute(
+                "INSERT OR IGNORE INTO edges (from_id, to_id, edge_type) VALUES (?, ?, ?)",
+                (node_id, to_id, edge_type),
+            )
+
+    def _edges_for(self, node_id: str, fm: dict, body: str) -> list[tuple[str, str]]:
+        """(to_id, edge_type) for each edge in a page's frontmatter and body.
 
         Edge types are singular: 'source', 'related', 'link'.
         raw_sources are provenance pointers — NOT extracted as graph edges.
         """
-        # Clear existing edges for this node
-        self.conn.execute("DELETE FROM edges WHERE from_id = ?", (node_id,))
+        edges = []
 
         # Source edges (from frontmatter sources: [...])
         for source_ref in (fm.get("sources") or []):
@@ -558,32 +629,22 @@ class Indexer:
             # Skip .raw/ references — these are provenance, not graph edges
             if target.startswith(".raw/") or target.startswith("raw/"):
                 continue
-            resolved = resolve_wikilink(target, self._resolution_table)
-            to_id = resolved or target
-            self.conn.execute(
-                "INSERT OR IGNORE INTO edges (from_id, to_id, edge_type) VALUES (?, ?, 'source')",
-                (node_id, to_id),
-            )
+            resolved = resolve_wikilink(target, self._resolution_table, self._resolution_lower)
+            edges.append((resolved or target, "source"))
 
         # Related edges
         for related_ref in (fm.get("related") or []):
             target = self._strip_wikilink(str(related_ref))
-            resolved = resolve_wikilink(target, self._resolution_table)
-            to_id = resolved or target
-            self.conn.execute(
-                "INSERT OR IGNORE INTO edges (from_id, to_id, edge_type) VALUES (?, ?, 'related')",
-                (node_id, to_id),
-            )
+            resolved = resolve_wikilink(target, self._resolution_table, self._resolution_lower)
+            edges.append((resolved or target, "related"))
 
         # Link edges from body wikilinks
-        wikilinks = extract_wikilinks(body)
-        for target in wikilinks:
-            resolved = resolve_wikilink(target, self._resolution_table)
+        for target in extract_wikilinks(body):
+            resolved = resolve_wikilink(target, self._resolution_table, self._resolution_lower)
             if resolved and resolved != node_id:
-                self.conn.execute(
-                    "INSERT OR IGNORE INTO edges (from_id, to_id, edge_type) VALUES (?, ?, 'link')",
-                    (node_id, resolved),
-                )
+                edges.append((resolved, "link"))
+
+        return edges
 
     @staticmethod
     def _strip_wikilink(ref: str) -> str:

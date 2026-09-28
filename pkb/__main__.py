@@ -28,7 +28,15 @@ def cmd_rebuild(args):
     from .indexer import Indexer
     from .embeddings import get_provider
 
-    if args.force:
+    if args.dry_run:
+        # A dry run must not write: no reset, no schema, no new file.
+        if not config.DB_PATH.exists():
+            print(f"No database at {config.DB_PATH}; a real rebuild would create it.")
+            return
+        if args.force:
+            print("Force rebuild (dry run): would drop and recreate the database.")
+        conn = get_connection()
+    elif args.force:
         print("Force rebuild: dropping and recreating database...")
         conn = reset_db()
     else:
@@ -47,6 +55,7 @@ def cmd_rebuild(args):
     print(f"Files deleted:  {stats['files_deleted']}")
     print(f"Chunks created: {stats['chunks_created']}")
     print(f"Chunks embedded:{stats['chunks_embedded']}")
+    print(f"Pages relinked: {stats['pages_relinked']}")
     if stats['errors']:
         print(f"Errors ({len(stats['errors'])}):")
         for e in stats['errors']:
