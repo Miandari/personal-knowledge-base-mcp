@@ -60,15 +60,17 @@ def _build_judge_prompt(question: str, wiki_pages: str, answer: str) -> str:
 def judge_with_anthropic(question: str, wiki_pages: str, answer: str, model: str = "") -> JudgeVerdict:
     import anthropic
 
-    model = model or os.getenv("TEST_JUDGE_MODEL") or "claude-sonnet-4-20250514"
+    model = model or os.getenv("TEST_JUDGE_MODEL") or "claude-sonnet-5"
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    # Current Claude models think adaptively by default: content[0] may be a
+    # thinking block, and max_tokens covers thinking + verdict, so leave room.
     response = client.messages.create(
         model=model,
-        max_tokens=500,
+        max_tokens=4000,
         system=JUDGE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": _build_judge_prompt(question, wiki_pages, answer)}],
     )
-    return _parse_verdict(response.content[0].text)
+    return _parse_verdict("".join(b.text for b in response.content if b.type == "text"))
 
 
 def judge_with_openai(question: str, wiki_pages: str, answer: str, model: str = "") -> JudgeVerdict:

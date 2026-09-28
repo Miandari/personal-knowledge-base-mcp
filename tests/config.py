@@ -18,8 +18,8 @@ VAULT_PATH = Path(__file__).resolve().parent / "fixtures" / "sample_vault"
 JUDGE_PROVIDER = "anthropic"
 
 # Which model to use. Provider-specific defaults:
-#   anthropic  -> claude-sonnet-4-20250514
+#   anthropic  -> claude-sonnet-5
 #   openai     -> gpt-4.1
 #   google     -> gemini-2.5-pro
 #   openrouter -> anthropic/claude-sonnet-4
-JUDGE_MODEL = "claude-sonnet-4-20250514"
+JUDGE_MODEL = "claude-sonnet-5"

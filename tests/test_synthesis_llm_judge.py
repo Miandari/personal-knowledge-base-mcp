@@ -69,8 +69,8 @@ def _synthesize_answer(query: str) -> tuple[str, str]:
     # Synthesize via Claude
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
+        model="claude-sonnet-5",
+        max_tokens=4000,  # adaptive thinking shares this budget with the answer
         system=(
             "You are answering questions from a personal knowledge base wiki. "
             "Ground every claim in the provided wiki pages. "
@@ -88,7 +88,7 @@ def _synthesize_answer(query: str) -> tuple[str, str]:
             }
         ],
     )
-    answer = response.content[0].text
+    answer = "".join(b.text for b in response.content if b.type == "text")
     return (pages_text, answer)
 
 
