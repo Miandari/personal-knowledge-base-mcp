@@ -10,8 +10,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from pkb import config
 
-VALID_ORIGINS = {"webpage", "paper", "conversation", "note", "book", "transcript", "meta"}
+
+VALID_ORIGINS = set(config.ORIGINS)
 VALID_SENTIMENTS = {"critical", "skeptical", "neutral", "mixed", "enthusiastic"}
 VALID_INGESTED_VIA = {"notion_briefing", "manual", "web_fetch", "youtube_mcp"}
 VALID_CONFIDENCE = {"high", "medium", "low"}

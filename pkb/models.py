@@ -73,6 +73,9 @@ class NodeDetail(_DatedModel):
     sourced_by: list[NodeSummary] = []
     related: list[NodeSummary] = []
     wikilinks_out: list[str] = []
+    # Freshness (filled by search.find for id lookups)
+    stale_sources: list[NodeSummary] = []  # sources updated after this page
+    new_since: list[NodeSummary] = []      # synthesis only: newer pages not yet linked
 
 
 class ExploreResult(BaseModel):

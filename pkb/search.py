@@ -657,6 +657,38 @@ def detect_new_sources(
     return new_sources
 
 
+def _new_since(
+    conn, node: NodeDetail, embedding_provider: EmbeddingProvider | None = None, limit: int = 10,
+) -> list[NodeSummary]:
+    """Newer pages that may belong in a synthesis but are not yet linked from it.
+
+    detect_new_sources, narrowed for "what changed since I wrote this". Dropped:
+    pages the synthesis already points at (source, related or link); pages
+    that list it in their own `sources` (built on it, so never its inputs);
+    and anything not updated after it. The date filter also removes same-run
+    pages that merely declared related: to it, which detect_new_sources lets
+    through regardless of date.
+
+    If the embedding search fails, hybrid search falls back to keyword hits,
+    which skip the distance filter, so suggestions get looser rather than
+    disappear. Any other error returns [] so the page read still succeeds.
+    """
+    connected = {
+        r["to_id"] for r in conn.execute("SELECT to_id FROM edges WHERE from_id = ?", (node.id,))
+    } | {
+        r["from_id"] for r in conn.execute(
+            "SELECT from_id FROM edges WHERE to_id = ? AND edge_type = 'source'", (node.id,))
+    }
+    try:
+        candidates = detect_new_sources(conn, node.id, embedding_provider)
+    except Exception:
+        return []
+    return [
+        c for c in candidates
+        if c.id not in connected and c.updated_at and c.updated_at > node.updated_at
+    ][:limit]
+
+
 # ── Explore ───────────────────────────────────────────────────────────
 
 def explore(
@@ -908,7 +940,14 @@ def find(
     published_before_n = normalize_filter_date("published_before", published_before)
 
     if id:
-        return get_node(conn, id)
+        node = get_node(conn, id)
+        if node is not None:
+            node.stale_sources = [
+                s for s in node.sources if s.updated_at and s.updated_at > node.updated_at
+            ]
+            if node.origin == "synthesis":
+                node.new_since = _new_since(conn, node, embedding_provider)
+        return node
 
     if query:
         filters: dict = {}

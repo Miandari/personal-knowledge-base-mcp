@@ -57,3 +57,12 @@ SKIP_FILES = {"hot.md", ".gitkeep"}
 # Node IDs of structural/navigation pages to demote in search results.
 # These pages are indexed (for kb_get) but deprioritized in search ranking.
 META_NODE_IDS = {"index", "log"}
+
+# ── Schema ─────────────────────────────────────────────────────────────
+# Allowed `origin` values: provenance, i.e. how the page's content came to
+# be, never its structural role. kb_save enforces this list. The indexer
+# stays lenient so a hand-edited page is never dropped.
+# `synthesis`: composed in one run from several sources (a field map, a
+# sweep, a comparison). Its writer lists every wiki page it used in
+# `sources:`, which is what staleness and kb_find's `new_since` build on.
+ORIGINS = ("webpage", "paper", "conversation", "note", "book", "transcript", "meta", "synthesis")

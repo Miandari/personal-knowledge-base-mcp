@@ -137,7 +137,8 @@ def cmd_search(args):
     conn = get_connection()
     try:
         query = args.query or ""
-        needs_embeddings = bool(query) and args.mode != "bm25"
+        # An id lookup needs embeddings too: a synthesis page's `new_since` is a search
+        needs_embeddings = bool(args.id) or (bool(query) and args.mode != "bm25")
         try:
             result = find(
                 conn,
@@ -182,6 +183,10 @@ def _render_find_result(result, by_id: bool, scored: bool):
         print(f"  updated: {result.updated_at}")
         if getattr(result, "tags", None):
             print(f"  tags:    {', '.join(result.tags)}")
+        if result.stale_sources:
+            print(f"  stale sources (updated after this page): {', '.join(s.id for s in result.stale_sources)}")
+        if result.new_since:
+            print(f"  new since (may belong here, not linked): {', '.join(s.id for s in result.new_since)}")
         if getattr(result, "body", None):
             print()
             print(result.body)

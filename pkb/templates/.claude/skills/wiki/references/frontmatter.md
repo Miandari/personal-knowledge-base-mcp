@@ -11,7 +11,7 @@ Every page, no exceptions:
 ```yaml
 ---
 title: "Human-Readable Title"
-origin: note                    # webpage|paper|conversation|note|book|transcript|meta
+origin: note                    # webpage|paper|conversation|note|book|transcript|meta|synthesis
 tags:
   - topic-tag
 related:
@@ -27,10 +27,13 @@ updated_at: 2026-05-05
 - `webpage`: articles, blog posts, docs, forum posts, READMEs
 - `paper`: academic papers
 - `conversation`: created during a conversation with an LLM
-- `note`: personal notes, observations, synthesis pages
+- `note`: personal notes and observations
 - `book`: book summaries or excerpts
 - `transcript`: video/audio transcripts (YouTube, podcasts)
 - `meta`: structural pages (index, log)
+- `synthesis`: composed in one run from several sources — a field map, a sweep, a comparison. See **Synthesis sources** below.
+
+`kb_save` rejects any other value.
 
 ## Optional Fields
 
@@ -74,6 +77,17 @@ aliases:
 - Body `[[wikilinks]]` — automatically extracted as `link` edges during indexing.
 
 All wikilinks are pathless: `[[agent-memory]]` not `[[concepts/agent-memory]]`.
+
+### Synthesis sources
+
+Whoever writes a synthesis records everything it drew on, as completely as it can:
+
+- Every existing wiki page the run used → `sources:`. This is what lets `kb_find` report `stale_sources` (inputs updated since) and `new_since` (newer pages not yet linked).
+- Everything else it used (papers, posts, talks, repos with no wiki page) → a `## Sources` section at the end of the body, one line each with a link. Never put URLs in `sources:`.
+- Pages it only mentions or sits next to → `related:`.
+- Sources point back in time: never list a page written after this one; that page should list the synthesis instead. Two pages that source each other mark each other stale on every edit.
+
+An incomplete list makes a synthesis look current when it isn't.
 
 ---
 

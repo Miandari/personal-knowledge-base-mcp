@@ -68,7 +68,7 @@ After research is complete, create these pages:
 **wiki/questions/**. One synthesis page titled "Research: [Topic]"
 - This is the master synthesis. Everything comes together here.
 - Sections: Overview, Key Findings, Entities, Concepts, Contradictions, Open Questions, Sources
-- Full frontmatter with related links to all pages created in this session
+- `origin: synthesis`. List every wiki page this run drew on in `sources:` (including the source pages created above), and outside material without a page in the body's `## Sources` section. Be complete; see `.claude/skills/wiki/references/frontmatter.md` → *Synthesis sources*. Then index it with `kb_save(id="<page-id>")` and show the user any warnings it returns.
 
 ---
 
@@ -76,18 +76,17 @@ After research is complete, create these pages:
 
 ```markdown
 ---
-type: synthesis
 title: "Research: [Topic]"
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
+origin: synthesis
 tags:
   - research
-  - [topic-tag]
-related:
-  - "[[Every page created in this session]]"
+  - <topic-tag>
 sources:
-  - "[[wiki/sources/Source 1]]"
-  - "[[wiki/sources/Source 2]]"
+  - "[[every-wiki-page-this-run-drew-on]]"
+related:
+  - "[[pages-it-only-mentions]]"
+created_at: YYYY-MM-DD
+updated_at: YYYY-MM-DD
 ---
 
 # Research: [Topic]
@@ -114,8 +113,8 @@ sources:
 - [Gap that needs more sources]
 
 ## Sources
-- [[Source 1]]: author, date
-- [[Source 2]]: author, date
+<!-- Outside material used that has no wiki page. Wiki pages go in `sources:` above. -->
+- Title, author, date: URL
 ```
 
 ---

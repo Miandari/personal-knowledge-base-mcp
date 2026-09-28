@@ -44,7 +44,10 @@ they've previously saved — NOT for general knowledge questions.
 
 Modes (chosen by which parameters you pass):
 - Get a page: kb_find(id="agent-memory") — full content + metadata + graph
-  edges. Returns None if not found.
+  edges. Returns None if not found. `stale_sources` lists the page's sources
+  updated after it. For a synthesis page, `new_since` lists newer pages that
+  may belong in it but aren't linked from it yet. When either is non-empty,
+  tell the user and offer to review. Never revise the page without asking.
 - Search: kb_find(query="agent memory") — hybrid FTS5 + vector search.
   Returns ranked results with scores and snippets. mode="hybrid" (default)
   for best quality; "bm25" for exact keyword matching.
@@ -115,11 +118,30 @@ Modes (determined by parameters):
 - Replace body: kb_save(id="...", body="full new body")
 - Reindex after external edit: kb_save(id="...")
 
-Origin values: webpage, paper, conversation, note, book, transcript, meta.
+Origin values (how the content came to be): webpage, paper, conversation,
+note, book, transcript, meta, synthesis. Anything else is rejected.
 
 Use `sources` for pages this was built FROM (creates source edges).
 Use `related` for pages this is RELEVANT TO (creates related edges).
 Wikilinks are pathless: use "agent-memory" not "concepts/agent-memory".
+
+Synthesis pages (origin="synthesis") come from working through several
+things in one run and summarizing them: a field map, a sweep, a comparison.
+Record everything the synthesis drew on, as completely as you can. An
+incomplete list makes the page look current when it isn't.
+- Every existing wiki page it used goes in `sources` (page ids). That is how
+  kb_find later flags the synthesis when a source changes or newer pages
+  appear.
+- Everything else it used (papers, posts, talks, repos with no wiki page)
+  goes in a `## Sources` section at the end of the body, one line each with
+  a link. Never put URLs in `sources`.
+- Pages it only mentions or sits next to go in `related`, not `sources`.
+- Sources point back in time: never list a page written after this one.
+  That later page should list this synthesis instead.
+If the run had one main input with a URL, pass it as source_url.
+
+The result may include `warnings`, e.g. a synthesis with no sources, or a
+source that isn't a wiki page. Show them to the user and offer to fix them.
 
 On create, returns `suggested_related` and `suggested_tags` from similar
 pages. Present these to the user — if they confirm, call kb_save again
@@ -186,6 +208,14 @@ def _get_provider(conn):
     return get_provider(provider_name, conn=conn)
 
 
+def _get_provider_or_none(conn):
+    """The embedding provider, or None if it can't be built (bad KB_EMBEDDING_PROVIDER)."""
+    try:
+        return _get_provider(conn)
+    except Exception:
+        return None
+
+
 def _reindex_file(conn, fp: Path) -> str | None:
     """Reindex a single file. Returns node_id or None."""
     # Flush detection: wait for write to complete
@@ -245,7 +275,13 @@ def kb_find(
             created_after=created_after, created_before=created_before,
             published_after=published_after, published_before=published_before,
             mode=mode, sort=sort, limit=limit,
-            embedding_provider=(_get_provider(conn) if (query and mode != "bm25") else None),
+            embedding_provider=(
+                _get_provider(conn) if (query and mode != "bm25")
+                # id lookups need it too (a synthesis page's `new_since` is a
+                # search), but must never fail over it: None falls back to keywords.
+                else _get_provider_or_none(conn) if id
+                else None
+            ),
         )
         if result is None:
             return None
@@ -279,6 +315,9 @@ def kb_save(
             f"Invalid date for published_at: {published_at!r}. "
             f"Expected YYYY, YYYY-MM, or YYYY-MM-DD."
         )
+
+    sources = _page_ids(sources)
+    related = _page_ids(related)
 
     # --- Create new page ---
     if not id and title:
@@ -333,6 +372,8 @@ def _create_page(
 
     if not origin:
         return {"error": "origin is required for new pages"}
+    if origin not in config.ORIGINS:
+        return {"error": f"Unknown origin {origin!r}. Use one of: {', '.join(config.ORIGINS)}."}
 
     slug = _slugify(title)
     file_path = config.WIKI_DIR / f"{slug}.md"
@@ -436,6 +477,9 @@ def _create_page(
                 result["suggested_related"] = []
                 result["suggested_tags"] = []
 
+            warnings = _page_warnings(conn, node_id)
+            if warnings:
+                result["warnings"] = warnings
             return result
         return {"error": "Indexing failed"}
     finally:
@@ -471,7 +515,7 @@ def _update_page(
             from .markdown import replace_or_insert_section
             content = fp.read_text(encoding="utf-8")
             content = replace_or_insert_section(content, section, body)
-            fp.write_text(content, encoding="utf-8")
+            fp.write_text(_touch_updated_at(content), encoding="utf-8")
 
         elif has_body:
             # Full body replacement (preserve frontmatter)
@@ -483,7 +527,7 @@ def _update_page(
                 fm_text = fm_match.group(0)
             else:
                 fm_text = ""
-            fp.write_text(fm_text + "\n" + body, encoding="utf-8")
+            fp.write_text(_touch_updated_at(fm_text + "\n" + body), encoding="utf-8")
 
         elif has_metadata:
             # Frontmatter-only update
@@ -499,10 +543,63 @@ def _update_page(
         result_id = _reindex_file(conn, fp)
         if result_id:
             summary = get_node_summary(conn, result_id)
-            return summary.model_dump() if summary else {"id": result_id}
+            result = summary.model_dump() if summary else {"id": result_id}
+            warnings = _page_warnings(conn, result_id)
+            if warnings:
+                result["warnings"] = warnings
+            return result
         return {"error": "Reindexing failed"}
     finally:
         conn.close()
+
+
+def _page_warnings(conn, node_id: str) -> list[str]:
+    """Non-blocking nudges about a saved page, for the writer to relay.
+
+    Runs on create, update and reindex (kb_save(id=...)), so pages written
+    with a file tool are checked too. An origin outside config.ORIGINS came
+    from outside kb_save's validation. Sources that resolve to no wiki page
+    (URLs, typos) become dead-end edges that kb_find never shows. A synthesis
+    without wiki-page sources can never be flagged stale.
+    """
+    warnings = []
+    origin_row = conn.execute("SELECT origin FROM nodes WHERE id = ?", (node_id,)).fetchone()
+    origin = origin_row["origin"] if origin_row else None
+    if origin and origin not in config.ORIGINS:
+        warnings.append(f"origin {origin!r} is not one of: {', '.join(config.ORIGINS)}.")
+    rows = conn.execute(
+        "SELECT e.to_id, n.id AS node FROM edges e LEFT JOIN nodes n ON n.id = e.to_id "
+        "WHERE e.from_id = ? AND e.edge_type = 'source'",
+        (node_id,),
+    ).fetchall()
+    unresolved = [r["to_id"] for r in rows if r["node"] is None]
+    if unresolved:
+        warnings.append(
+            f"Not wiki pages, so not linked: {', '.join(unresolved)}. `sources` takes wiki "
+            "page ids. A page's own URL goes in `url` (source_url). Other outside material "
+            "goes in a '## Sources' section at the end of the body."
+        )
+    mutual = [
+        r["to_id"] for r in conn.execute(
+            "SELECT e.to_id FROM edges e WHERE e.from_id = ? AND e.edge_type = 'source' "
+            "AND e.to_id != e.from_id AND EXISTS (SELECT 1 FROM edges b "
+            "WHERE b.from_id = e.to_id AND b.to_id = e.from_id AND b.edge_type = 'source')",
+            (node_id,),
+        )
+    ]
+    if mutual:
+        warnings.append(
+            f"{', '.join(mutual)} also list(s) this page in `sources`. Two pages that source each "
+            "other mark each other stale on every edit. Keep the edge only on the page written later."
+        )
+    real_sources = [r for r in rows if r["node"] is not None and r["to_id"] != node_id]
+    if origin == "synthesis" and not real_sources:
+        warnings.append(
+            "This synthesis lists no wiki pages in `sources`. Add every existing page the run "
+            "drew on with kb_save(id=..., sources=[...]); without them pkb can't tell when it "
+            "goes stale or what newer pages belong in it."
+        )
+    return warnings
 
 
 def _apply_frontmatter_updates(
@@ -532,8 +629,8 @@ def _apply_frontmatter_updates(
     if published_at:
         lines = _set_fm_scalar(lines, "published_at", published_at)
 
-    # Update updated_at
-    lines = _set_fm_scalar(lines, "updated_at", date.today().isoformat())
+    # No updated_at bump: it records content edits (body/section), which is
+    # what staleness compares. A tag change must not mark syntheses stale.
 
     # Replace list fields (None = don't touch, [] = clear, [...] = set)
     if tags is not None:
@@ -544,6 +641,28 @@ def _apply_frontmatter_updates(
         lines = _replace_fm_list(lines, "related", [f'"[[{r}]]"' for r in related])
 
     return "---\n" + "\n".join(lines) + "\n---\n" + rest
+
+
+def _touch_updated_at(content: str) -> str:
+    """Set frontmatter updated_at to today, because the page's content changed."""
+    fm_match = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)
+    if not fm_match:
+        return content
+    lines = _set_fm_scalar(fm_match.group(1).split("\n"), "updated_at", date.today().isoformat())
+    return "---\n" + "\n".join(lines) + "\n---\n" + content[fm_match.end():]
+
+
+def _page_ids(values: list[str] | None) -> list[str] | None:
+    """Page ids from `sources`/`related` input, accepting "[[page]]" and "[[page|label]]"."""
+    if values is None:
+        return None
+    ids = []
+    for v in values:
+        v = v.strip()
+        if v.startswith("[[") and v.endswith("]]"):
+            v = v[2:-2].split("|")[0].strip()
+        ids.append(v)
+    return ids
 
 
 def _set_fm_scalar(lines: list[str], key: str, value: str) -> list[str]:

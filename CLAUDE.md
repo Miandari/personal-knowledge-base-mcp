@@ -42,7 +42,8 @@ This is the **software repo**, not a vault. Personal wiki content lives in a sep
 ## Key concepts
 
 - **Vault**: a directory with `wiki/`, `.raw/`, `pkb.db`, and config files. Created by `pkb init`.
-- **Origin**: provenance of a page — `webpage | paper | conversation | note | book | transcript | meta`. NOT structural role.
+- **Origin**: provenance of a page — `webpage | paper | conversation | note | book | transcript | meta | synthesis`. NOT structural role. Canonical list: `config.ORIGINS`; `kb_save` rejects anything else, the indexer stays lenient.
+- **Synthesis**: a page composed in one run from several sources (field map, sweep, comparison). Its writer lists every wiki page it drew on in `sources:` and outside material in a body `## Sources` section. `kb_find(id)` then reports `stale_sources` and `new_since` for it.
 - **Structural role is emergent**: hub pages detected by graph structure (outgoing source edges), not by declared origin or section headings.
 - **Edge types**: `source`, `related`, `link` (all singular).
 - **Flat vault**: all pages at `wiki/` root, no subdirectories. Node IDs are flat slugs (`agent-memory`).

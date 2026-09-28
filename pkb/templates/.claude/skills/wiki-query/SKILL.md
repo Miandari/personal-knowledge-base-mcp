@@ -155,21 +155,25 @@ When filing an answer:
 
 ```yaml
 ---
-type: question
 title: "Short descriptive title"
+origin: synthesis   # the answer draws on several pages; otherwise note
 question: "The exact query as asked."
 answer_quality: solid
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
-tags: [question, <domain>]
-related:
-  - "[[Page referenced in answer]]"
+tags:
+  - question
+  - <domain>
 sources:
-  - "[[wiki/sources/relevant-source.md]]"
+  - "[[every-page-the-answer-drew-on]]"
+related:
+  - "[[page-mentioned-but-not-used]]"
+created_at: YYYY-MM-DD
+updated_at: YYYY-MM-DD
 ---
 ```
 
 Then write the answer as the page body. Include citations. Link every mentioned concept or entity.
+
+A filed answer that draws on several pages is a synthesis: list every page it used in `sources`, and any outside material in a `## Sources` section. Be complete; see `.claude/skills/wiki/references/frontmatter.md` → *Synthesis sources*. Then index it with `kb_save(id="<page-id>")` and show the user any warnings it returns.
 
 After filing, add an entry to `wiki/index.md` under Questions and append to `wiki/log.md`.
 

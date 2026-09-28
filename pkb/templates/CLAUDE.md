@@ -22,7 +22,7 @@ Personal knowledge base powered by pkb-mcp. See the [pkb-mcp README](https://git
 
 ```yaml
 title: "Page title"
-origin: note              # webpage|paper|conversation|note|book|transcript|meta
+origin: note              # webpage|paper|conversation|note|book|transcript|meta|synthesis
 ingested_via: manual      # manual|claude_code|claude_ui|notion_briefing|web_fetch|youtube_mcp
 aliases:
   - "Alternative Name"
@@ -39,6 +39,7 @@ updated_at: 2026-01-01
 ```
 
 - `sources:` — graph edges to wiki pages (pages this was built from)
+- **Synthesis pages** (`origin: synthesis`, written by working through several things in one run): list every wiki page the run drew on in `sources:`, and everything else it used in a `## Sources` section at the end of the body. Be complete — an incomplete list makes the page look current when it isn't.
 - `raw_sources:` — provenance pointers to `.raw/` files (NOT graph edges)
 - `aliases:` — old names/paths, survive `pkb rebuild --force`
 - Wikilinks are pathless: `[[agent-memory]]` not `[[concepts/agent-memory]]`

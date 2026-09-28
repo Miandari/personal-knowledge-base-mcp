@@ -217,7 +217,7 @@ kb_save(id="...")                                          # reindex after exter
 
 ## Data model
 
-Every page is a **node** with an `origin` field describing its provenance (`webpage`, `paper`, `conversation`, `note`, `book`, `transcript`, `meta`). Nodes link via **edges** with three types:
+Every page is a **node** with an `origin` field describing its provenance (`webpage`, `paper`, `conversation`, `note`, `book`, `transcript`, `meta`, `synthesis`). Nodes link via **edges** with three types:
 
 - **source** — "this page was built from these" (frontmatter `sources: []`)
 - **related** — "this page is related to these" (frontmatter `related: []`)

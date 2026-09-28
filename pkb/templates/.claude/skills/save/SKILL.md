@@ -32,6 +32,8 @@ Determine the best type from the conversation content:
 
 If the user specifies a type, use that. If not, pick the best fit based on the content. When in doubt, use `synthesis`.
 
+Frontmatter `origin` by type: synthesis → `synthesis`, session → `conversation`, source → the material's own kind (`webpage`, `paper`, `book`, `transcript`), concept and decision → `note`.
+
 ---
 
 ## Save Workflow
@@ -41,7 +43,7 @@ If the user specifies a type, use that. If not, pick the best fit based on the c
 3. **Determine** note type using the table above.
 4. **Extract** all relevant content from the conversation. Rewrite it in declarative present tense (not "the user asked" but the actual content itself).
 5. **Create** the note in the correct folder with full frontmatter.
-6. **Collect links**: identify any wiki pages mentioned in the conversation. Add them to `related` in frontmatter.
+6. **Collect links**: identify any wiki pages mentioned in the conversation. Add them to `related` in frontmatter. For a synthesis, every wiki page the analysis drew on goes in `sources` instead, and outside material in a `## Sources` section at the end of the body. Be complete; see `.claude/skills/wiki/references/frontmatter.md` → *Synthesis sources*. Then index it with `kb_save(id="<page-id>")` and show the user any warnings it returns.
 7. **Update** `wiki/index.md`. Add the new entry at the top of the relevant section.
 8. **Append** to `wiki/log.md`. New entry at the TOP:
    ```
@@ -59,16 +61,18 @@ If the user specifies a type, use that. If not, pick the best fit based on the c
 
 ```yaml
 ---
-type: <synthesis|concept|source|decision|session>
 title: "Note Title"
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
+origin: <synthesis|conversation|note|webpage|paper|book|transcript>
 tags:
   - <relevant-tag>
+sources:
+  - "[[wiki-page-this-drew-on]]"
 related:
   - "[[Any Wiki Page Mentioned]]"
-sources:
-  - "[[.raw/source-if-applicable.md]]"
+raw_sources:
+  - ".raw/source-if-applicable.md"
+created_at: YYYY-MM-DD
+updated_at: YYYY-MM-DD
 ---
 ```
 

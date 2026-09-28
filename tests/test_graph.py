@@ -100,7 +100,7 @@ class TestExplore:
         assert result.topic == "AI coding agents"
         # Should find a hub page
         if result.hub:
-            assert result.hub.origin in ("note", "webpage", "paper", "conversation", "book", "transcript", "meta")
+            assert result.hub.origin in config.ORIGINS
 
     def test_explore_returns_search_results(self, conn):
         """Explore should always include search results."""

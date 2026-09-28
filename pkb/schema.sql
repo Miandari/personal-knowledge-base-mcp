@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     id            TEXT PRIMARY KEY,    -- slug: "agent-memory"
     file_path     TEXT NOT NULL UNIQUE,-- "wiki/agent-memory.md"
     title         TEXT NOT NULL,
-    origin        TEXT NOT NULL,       -- webpage|paper|conversation|note|book|transcript|meta
+    origin        TEXT NOT NULL,       -- config.ORIGINS: webpage|paper|conversation|note|book|transcript|meta|synthesis
     created_at    TEXT NOT NULL,       -- YYYY-MM-DD
     updated_at    TEXT NOT NULL,
     -- Denormalized filterable fields
