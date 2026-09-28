@@ -480,22 +480,33 @@ class Indexer:
     # ── Between passes ─────────────────────────────────────────────
 
     def _build_resolution_table(self) -> None:
-        """Build in-memory dict for O(1) wikilink resolution."""
+        """Build in-memory dict for O(1) wikilink resolution.
+
+        Each key maps to the distinct node ids that claim it. A page whose
+        title normalises to its own slug ("Agent memory" -> agent-memory)
+        reaches that key twice, as node id and as title alias. It must be
+        listed once, or resolve_wikilink reads the key as ambiguous and the
+        body link is dropped.
+        """
         self._resolution_table = {}
+
+        def add(key: str, node_id: str) -> None:
+            ids = self._resolution_table.setdefault(key, [])
+            if node_id not in ids:
+                ids.append(node_id)
 
         # Node IDs (flat slugs)
         for row in self.conn.execute("SELECT id FROM nodes"):
-            nid = row["id"]
-            self._resolution_table.setdefault(nid, []).append(nid)
+            add(row["id"], row["id"])
 
         # Aliases (normalized key → node_id)
         for row in self.conn.execute("SELECT alias_norm, alias, node_id FROM aliases"):
             anorm = row["alias_norm"]
             alias_lower = row["alias"].lower()
-            self._resolution_table.setdefault(anorm, []).append(row["node_id"])
+            add(anorm, row["node_id"])
             # Also add the raw alias (lowercased) for case-insensitive matching
             if alias_lower != anorm:
-                self._resolution_table.setdefault(alias_lower, []).append(row["node_id"])
+                add(alias_lower, row["node_id"])
 
     # ── Pass 2 ─────────────────────────────────────────────────────
 

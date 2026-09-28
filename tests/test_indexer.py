@@ -128,6 +128,68 @@ class TestWikilinkResolution:
         assert resolve_wikilink("agent", table) is None
 
 
+class TestResolutionTable:
+    """_build_resolution_table: each key lists the DISTINCT nodes that claim it.
+
+    The tests above hand-build their tables, so they never saw the indexer list
+    a page twice under its own slug, which silently dropped [[slug]] body links.
+    """
+
+    @staticmethod
+    def _page(title, body, extra=""):
+        return (
+            f"---\norigin: note\ntitle: {title}\ncreated_at: 2026-04-12\n{extra}---\n\n"
+            f"# {title}\n\n{body}\n"
+        )
+
+    def test_title_alias_equal_to_slug_is_not_ambiguous(self, tmp_db, tmp_path):
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        (wiki / "agent-memory.md").write_text(self._page("Agent memory", "Hub."))
+        (wiki / "linker.md").write_text(self._page("Linker", "See [[agent-memory]]."))
+
+        indexer = Indexer(tmp_db, wiki_dir=wiki, embedding_provider=NoopEmbedding())
+        indexer.rebuild()
+        table = indexer._resolution_table
+
+        assert table["agent-memory"] == ["agent-memory"]
+        assert all(len(ids) == len(set(ids)) for ids in table.values())
+        assert resolve_wikilink("agent-memory", table) == "agent-memory"
+        assert resolve_wikilink("Agent-Memory", table) == "agent-memory"
+        edge = tmp_db.execute(
+            "SELECT 1 FROM edges WHERE from_id = 'linker' AND to_id = 'agent-memory' "
+            "AND edge_type = 'link'"
+        ).fetchone()
+        assert edge is not None
+
+    def test_distinct_nodes_sharing_a_key_stay_ambiguous(self, tmp_db, tmp_path):
+        """Dedupe collapses repeats of one node, never two different nodes.
+
+        The rows are inserted directly. In a real index this collision takes an
+        alias equal to another page's slug: on a fresh build pass 1 upserts the
+        aliasing page first, and the alias-conflict check never consults
+        nodes.id. That is a separate issue, and this test must not pin how it
+        gets resolved.
+        """
+        for nid in ("agent-memory", "other-page"):
+            tmp_db.execute(
+                "INSERT INTO nodes (id, file_path, title, origin, created_at, updated_at, body) "
+                "VALUES (?, ?, ?, 'note', '2026-04-12', '2026-04-12', '')",
+                (nid, f"wiki/{nid}.md", nid),
+            )
+        tmp_db.execute(
+            "INSERT INTO aliases (alias_norm, alias, node_id, alias_kind) "
+            "VALUES ('agent-memory', 'agent-memory', 'other-page', 'manual')"
+        )
+
+        indexer = Indexer(tmp_db, wiki_dir=tmp_path, embedding_provider=NoopEmbedding())
+        indexer._build_resolution_table()
+        table = indexer._resolution_table
+
+        assert sorted(table["agent-memory"]) == ["agent-memory", "other-page"]
+        assert resolve_wikilink("agent-memory", table) is None
+
+
 class TestChunking:
     """Test body chunking for embedding."""
 
@@ -311,3 +373,43 @@ class TestIndexerSandbox:
         # But no actual data in DB
         count = tmp_db.execute("SELECT COUNT(*) as cnt FROM nodes").fetchone()["cnt"]
         assert count == 0, f"Dry run should not write to DB, got {count} nodes"
+
+
+class TestLinkEdgesSampleVault:
+    """Body [[wikilinks]] become link edges on a fresh index of the sample vault."""
+
+    @staticmethod
+    def _links(conn, from_id):
+        rows = conn.execute(
+            "SELECT to_id FROM edges WHERE from_id = ? AND edge_type = 'link'", (from_id,)
+        )
+        return {r["to_id"] for r in rows}
+
+    def test_every_body_link_to_an_existing_page_has_an_edge(self, sandbox):
+        conn = sandbox.conn
+        wiki = sandbox.vault_path / "wiki"
+        node_ids = {r["id"] for r in conn.execute("SELECT id FROM nodes")}
+        missing, targets = [], set()
+        for path in sorted(wiki.rglob("*.md")):
+            from_id = slug_from_path(path, wiki)
+            if from_id not in node_ids:
+                continue
+            _, body = parse_markdown(path)
+            links = self._links(conn, from_id)
+            for target in extract_wikilinks(body):
+                if target in node_ids and target != from_id:
+                    targets.add(target)
+                    if target not in links:
+                        missing.append((from_id, target))
+
+        # The bug only hit pages whose title normalises to their slug. Keep at
+        # least one such target, or this test stops guarding against it.
+        self_titled = {
+            r["node_id"] for r in conn.execute("SELECT node_id FROM aliases WHERE alias_norm = node_id")
+        }
+        assert targets & self_titled
+        assert missing == []
+
+    def test_page_with_only_body_links_is_connected(self, sandbox):
+        # related: [] and sources: [], so body links are its only possible edges
+        assert {"graphrag", "raptor"} <= self._links(sandbox.conn, "demand-driven-compilation")

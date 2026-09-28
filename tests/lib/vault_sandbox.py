@@ -57,6 +57,11 @@ class VaultSandbox:
 
         return self
 
+    @property
+    def conn(self):
+        """The sandbox index connection."""
+        return self._conn
+
     def __exit__(self, *exc):
         if self._conn:
             self._conn.close()
